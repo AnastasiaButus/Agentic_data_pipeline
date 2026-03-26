@@ -37,7 +37,7 @@ def test_context_from_config_uses_tmp_root(tmp_path: Path) -> None:
 
     config = AppConfig(
         project=ProjectConfig(name="fitness-demo", root_dir=Path("/not-used")),
-        source=SourceConfig(name="reviews"),
+        source=SourceConfig(use_huggingface=True),
         annotation=AnnotationConfig(),
     )
 

@@ -11,4 +11,5 @@ STANDARD_COLUMNS = (
     "rating",
     "created_at",
     "split",
+    "meta_json",
 )

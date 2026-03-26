@@ -42,7 +42,7 @@ class StubNormalizer:
 
     def normalize_reviews(self, df: object, source_name: str, source_type: str) -> Any:
         self.calls.append(df)
-        if df == [] or getattr(df, "empty", False):
+        if _is_empty_frame(df):
             return _Frame([], columns=["id", "source", "text", "label", "rating", "created_at", "split", "meta_json"])
         return _Frame(
             [
@@ -73,6 +73,20 @@ class _Frame:
         if not self._columns:
             return [dict(row) for row in self._rows]
         return [{column: row.get(column) for column in self._columns} for row in self._rows]
+
+
+def _is_empty_frame(df: object) -> bool:
+    """Check emptiness without triggering pandas comparison semantics."""
+
+    if df is None:
+        return True
+    empty = getattr(df, "empty", None)
+    if isinstance(empty, bool):
+        return empty
+    try:
+        return len(df) == 0  # type: ignore[arg-type]
+    except Exception:
+        return df == []
 
 
 def _make_context(tmp_path: Path) -> PipelineContext:

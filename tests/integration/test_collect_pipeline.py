@@ -89,5 +89,8 @@ def test_collect_pipeline_hf_and_scrape_sources_return_canonical_schema(tmp_path
     )
 
     assert list(result.columns) == ["id", "source", "text", "label", "rating", "created_at", "split", "meta_json"]
-    assert [row["source"] for row in result.to_dict(orient="records")] == ["HF", "Web"]
+    rows = result.to_dict(orient="records")
+    assert len(rows) == 3
+    assert [row["source"] for row in rows] == ["HF", "Web", "Web"]
+    assert [row["text"] for row in rows] == ["Great product", "Great product", "Too sweet"]
     assert agent.registry.saved_paths == ["data/raw/merged_raw.parquet"]

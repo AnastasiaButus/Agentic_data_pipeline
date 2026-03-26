@@ -1,0 +1,3 @@
+id,source,text,label,rating,created_at,split,meta_json,sentiment_label,effect_label,confidence,reviewed_effect_label,review_comment,human_verified
+1,HF,"Great product",,5,now,,"{}",positive,energy,0.4,,,False
+2,Web,"Too many side effects",,1,now,,"{}",negative,side_effects,,,

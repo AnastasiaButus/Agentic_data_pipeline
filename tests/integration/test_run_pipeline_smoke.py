@@ -4,42 +4,30 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.core.config import load_config
 from src.agents.data_collection_agent import DataCollectionAgent
 from src.agents.active_learning_agent import ActiveLearningAgent
-from src.services.artifact_registry import ArtifactRegistry
 from src.services.review_queue_service import ReviewQueueService
 from src.services.training_service import TrainingService
 from src.domain import SourceCandidate
+import src.services.pipeline_controller as pipeline_controller_module
 
 
 def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path, monkeypatch) -> None:
     """The CLI should run end-to-end and persist the final report and model metrics."""
 
-    config_path = tmp_path / "config.yml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "project:",
-                "  name: fitness-demo",
-                f"  root_dir: {tmp_path.as_posix()}",
-                "request:",
-                "  topic: fitness supplements",
-                "  modality: text",
-                "  task_type: classification",
-                "  domain: supplements",
-                "source:",
-                "  use_huggingface: true",
-                "  use_public_api: false",
-                "  use_internal_api: false",
-                "  use_github_search: false",
-                "  use_scraping_fallback: false",
-                "annotation:",
-                "  use_llm: false",
-                "  confidence_threshold: 0.6",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    repo_root = Path(__file__).resolve().parents[2]
+    template_path = repo_root / "configs" / "demo_fitness.yaml"
+    template_text = template_path.read_text(encoding="utf-8")
+
+    assert "fitness supplements" in template_text
+
+    config_path = tmp_path / "demo_fitness.runtime.yaml"
+    config_path.write_text(template_text.replace("root_dir: .", f"root_dir: {tmp_path.as_posix()}"), encoding="utf-8")
+
+    loaded_config = load_config(config_path)
+    assert loaded_config.request.topic == "fitness supplements"
+    assert loaded_config.annotation.use_llm is False
 
     from src.services.source_discovery_service import SourceDiscoveryService
 
@@ -52,10 +40,42 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path, mon
         return _collection_rows()
 
     call_order: list[str] = []
+    captured_llm_clients: list[object | None] = []
+
+    class FakeAnnotationAgent:
+        """Minimal offline annotation stub that records the llm_client wiring."""
+
+        def __init__(self, ctx, llm_client=None, registry=None):
+            captured_llm_clients.append(llm_client)
+            self.ctx = ctx
+            self.llm_client = llm_client
+
+        def auto_label(self, df):
+            rows = list(df) if isinstance(df, list) else df.to_dict(orient="records")
+            output = []
+            for row in rows:
+                text = str(row.get("text", "")).lower()
+                effect_label = "energy" if "energy" in text else ("side_effects" if "side effect" in text else "other")
+                sentiment_label = "positive" if effect_label == "energy" else ("negative" if effect_label == "side_effects" else "neutral")
+                output.append(
+                    {
+                        **row,
+                        "sentiment_label": sentiment_label,
+                        "effect_label": effect_label,
+                        "confidence": 0.5,
+                    }
+                )
+            return output
+
+        def check_quality(self, df_labeled):
+            rows = list(df_labeled) if isinstance(df_labeled, list) else df_labeled.to_dict(orient="records")
+            return {"confidence_threshold": 0.6, "n_low_confidence": len(rows), "n_rows": len(rows)}
+
+    monkeypatch.setattr(pipeline_controller_module, "AnnotationAgent", FakeAnnotationAgent)
 
     def fake_export_low_confidence_queue(self, df, threshold=0.7):
         call_order.append("export_low_confidence_queue")
-        return _collection_rows()
+        return list(df) if isinstance(df, list) else df.to_dict(orient="records")
 
     def fake_load_corrected_queue(self, path=None):
         call_order.append("load_corrected_queue")
@@ -150,6 +170,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path, mon
     exit_code = main(["--config", str(config_path)])
 
     assert exit_code == 0
+    assert captured_llm_clients == [None]
     assert call_order[:3] == ["export_low_confidence_queue", "load_corrected_queue", "merge_reviewed_labels"]
     assert "run_cycle" in call_order
     assert call_order[-1] == "train"

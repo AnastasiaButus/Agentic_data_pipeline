@@ -33,6 +33,30 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path, mon
     def fake_collection_run(self, sources):
         return _collection_rows()
 
+    class InjectedAnnotationAgent:
+        """Offline annotation stub injected into the controller to prove it is preserved."""
+
+        def auto_label(self, df):
+            rows = list(df) if isinstance(df, list) else df.to_dict(orient="records")
+            output = []
+            for row in rows:
+                text = str(row.get("text", "")).lower()
+                effect_label = "energy" if "energy" in text else ("side_effects" if "side effect" in text else "other")
+                sentiment_label = "positive" if effect_label == "energy" else ("negative" if effect_label == "side_effects" else "neutral")
+                output.append(
+                    {
+                        **row,
+                        "sentiment_label": sentiment_label,
+                        "effect_label": effect_label,
+                        "confidence": 0.5,
+                    }
+                )
+            return output
+
+        def check_quality(self, df_labeled):
+            rows = list(df_labeled) if isinstance(df_labeled, list) else df_labeled.to_dict(orient="records")
+            return {"confidence_threshold": 0.6, "n_low_confidence": len(rows), "n_rows": len(rows)}
+
     call_order: list[str] = []
 
     def fake_load_corrected_queue(self, path=None):
@@ -133,10 +157,14 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path, mon
     monkeypatch.setattr(ActiveLearningAgent, "run_cycle", fake_run_cycle)
     monkeypatch.setattr(TrainingService, "train", fake_train)
 
-    controller = PipelineController(ctx)
+    injected_annotation_agent = InjectedAnnotationAgent()
+    controller = PipelineController(ctx, annotation_agent=injected_annotation_agent)
+
+    assert controller.annotation_agent is injected_annotation_agent
     summary = controller.run()
 
     assert summary["review_status"] == "merged"
+    assert controller.annotation_agent is injected_annotation_agent
     assert call_order[:3] == ["export_low_confidence_queue", "load_corrected_queue", "merge_reviewed_labels"]
     assert "run_cycle" in call_order
     assert call_order[-1] == "train"

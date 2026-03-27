@@ -37,7 +37,13 @@ class PipelineController:
         self.discovery_service = discovery_service if discovery_service is not None else SourceDiscoveryService(ctx)
         self.collection_agent = collection_agent if collection_agent is not None else DataCollectionAgent(ctx)
         self.quality_agent = quality_agent if quality_agent is not None else DataQualityAgent(ctx)
-        self.annotation_agent = annotation_agent if annotation_agent is not None else AnnotationAgent(ctx, llm_client=MockLLM())
+        if annotation_agent is not None:
+            self.annotation_agent = annotation_agent
+        else:
+            use_llm = bool(getattr(getattr(ctx.config, "annotation", None), "use_llm", False))
+            # Demo runs stay offline by default; MockLLM is only enabled when the config opts in.
+            llm_client = MockLLM() if use_llm else None
+            self.annotation_agent = AnnotationAgent(ctx, llm_client=llm_client)
         self.review_queue_service = review_queue_service if review_queue_service is not None else ReviewQueueService(ctx)
         self.active_learning_agent = active_learning_agent if active_learning_agent is not None else ActiveLearningAgent(ctx)
         self.training_service = training_service if training_service is not None else TrainingService(ctx)

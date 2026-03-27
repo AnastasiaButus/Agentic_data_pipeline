@@ -1,12 +1,26 @@
 # Universal Agentic Data Pipeline
 
-## Project Overview
+## Обзор проекта
 
-This repository contains a modular Python pipeline for text-based review data. The current baseline is runnable in offline demo mode and is intentionally kept narrow: it supports local demo execution, canonical normalization, annotation, human review, active learning, training, and reporting.
+Этот репозиторий содержит **offline-first agentic data pipeline** для работы с текстовыми отзывами.
 
-The project is not presented as production-ready. The real online discovery path is still incomplete, and the current working baseline relies on offline demo payloads for repeatable local runs.
+Проект сознательно позиционируется не как production-ready система, а как **воспроизводимый research/demo pipeline**. Он предназначен для стабильного локального запуска, демонстрации на защите, пошагового анализа качества данных и контролируемого расширения без разрушения базового сценария.
 
-## Pipeline Stages
+---
+
+## Архитектурная позиция проекта
+
+- Проект использует **offline-first стратегию**: offline-режим является основным стабильным baseline.
+- **Offline-режим** — это базовый сценарий для локального воспроизводимого запуска, демо и курсовой защиты.
+- **Online-режим** — это расширение baseline, а не его замена.
+- Offline и online — это **две осознанные стратегии использования одного и того же pipeline**, а не конфликтующие ветки проекта.
+- **Human-in-the-loop (HITL)** встроен в архитектуру как обязательный этап review после annotation.
+- В pipeline есть **training stage и ML-компонент под капотом**; ML-контур является частью архитектуры, а не внешней надстройкой.
+- Проект является **agentic pipeline**, потому что состоит из последовательных этапов, каждый из которых решает свою подзадачу и передаёт результат следующему шагу.
+
+---
+
+## Этапы pipeline
 
 - Source discovery
 - Data collection
@@ -17,150 +31,247 @@ The project is not presented as production-ready. The real online discovery path
 - Training
 - Reporting
 
-The main training target is `text -> effect_label`.
+Агентная цепочка в проекте:
 
-## Discovery Modes
+`discovery -> collection -> quality -> annotation -> review/HITL -> active learning/training -> reporting`
 
-The repository currently supports two discovery modes:
+Каждый этап отвечает за свой участок обработки и передаёт результат дальше по pipeline.
 
-- Offline demo mode for the persistent fitness and minecraft configs. This path is deterministic and designed for reproducible local coursework runs.
-- Emerging online discovery mode for non-demo configs. The online discovery path now includes a Hugging Face datasets discovery MVP plus a narrow GitHub repository discovery MVP that both search by the current request topic without auto-adding artificial API, GitHub, or scrape stubs.
+Основная обучающая постановка в текущем baseline: `text -> effect_label`.
 
-The online path is discovery-only at this stage. It does not replace the offline demo flow and should not be read as a fully production-ready online agent.
+---
 
-## Human-in-the-Loop Point
+## Режимы discovery и запуска
 
-Human-in-the-loop review happens after annotation. Low-confidence rows are exported to a review queue, corrected labels can be merged back by canonical `id`, and downstream stages continue from the reviewed data.
+Сейчас в проекте поддерживаются два режима работы:
 
-Label Studio export is supported for annotated batches.
+- **Offline demo mode** для стабильных demo-конфигов fitness и minecraft. Это детерминированный и воспроизводимый baseline.
+- **Online mode** для non-demo конфигов. Этот режим расширяет baseline и включает узкий discovery-path через Hugging Face datasets и GitHub repository search для поиска источников по теме.
 
-The source shortlist report is now written in Russian and is meant for human review before approval. It lists discovered candidates in a compact, readable format and also saves a machine-readable `data/raw/approval_candidates.json` helper artifact for review tooling.
+Важно: online-path **не заменяет offline baseline**. Offline-режим остаётся основным сценарием проекта, а online-режим добавляет возможность работы с внешними источниками в рамках той же архитектуры.
 
-`data/raw/approved_sources.json` remains the separate human-edited approval input.
+---
 
-After auto-annotation, the pipeline also writes `data/interim/review_queue.csv` for manual checking, a Russian `reports/review_queue_report.md` for the reviewer, and a machine-readable `data/interim/review_queue_context.json` helper artifact for tooling or lightweight review UI support.
+## Human-in-the-Loop
 
-The annotation stage also writes a compact Russian annotation trace pack: `reports/annotation_trace_report.md` and `data/interim/annotation_trace.json`. It records the prompt contract, the expected output fields, and the parser/fallback behavior used for auto-labeling. This is a reporting artifact layer, not a real API client.
+Human-in-the-loop review — это **обязательный архитектурный этап**, расположенный после annotation.
 
-### How to Enable Gemini Annotation
+На этом шаге:
 
-The online Gemini path is opt-in and intentionally narrow. It is enabled only when all three are true:
+- строки с низкой уверенностью экспортируются в review queue;
+- исправленные человеком метки возвращаются в pipeline по каноническому `id`;
+- последующие этапы продолжают работу уже с reviewed data.
+
+HITL используется для:
+
+- ручной проверки спорных и низкоуверенных примеров;
+- исправления неоднозначной авторазметки;
+- повышения надёжности итогового pipeline.
+
+В рамках этого проекта HITL — это **не косметическое улучшение**, а встроенный механизм контроля качества.
+
+Экспорт в Label Studio поддерживается для размеченных батчей.
+
+Отчёт по shortlist источников формируется на русском языке и предназначен для ручного просмотра перед одобрением. Дополнительно сохраняется machine-readable артефакт `data/raw/approval_candidates.json` для review/tooling-сценариев.
+
+Файл `data/raw/approved_sources.json` остаётся отдельным human-edited входом для approval step.
+
+После авторазметки pipeline также сохраняет:
+
+- `data/interim/review_queue.csv` — очередь для ручной проверки;
+- `reports/review_queue_report.md` — русский отчёт-инструкция для reviewer;
+- `data/interim/review_queue_context.json` — machine-readable helper artifact для tooling или лёгкого UI-слоя.
+
+Этап annotation также сохраняет компактный русский trace-pack:
+
+- `reports/annotation_trace_report.md`
+- `data/interim/annotation_trace.json`
+
+Он фиксирует prompt contract, ожидаемые выходные поля и поведение parser/fallback. Это слой отчётности и наблюдаемости, а не полноценный API client framework.
+
+---
+
+## Как включить Gemini-разметку
+
+Gemini-path является **опциональным и узким расширением** текущего annotation flow. Он включается только тогда, когда одновременно выполнены три условия:
 
 - `annotation.use_llm: true`
 - `annotation.llm_provider: gemini`
-- `GEMINI_API_KEY` is set in the current shell
+- в текущей shell-сессии задан `GEMINI_API_KEY`
 
-The `configs/demo_fitness.yaml` baseline is deliberately pinned to `llm_provider: mock`, so the demo run stays offline and deterministic by default. If the key is missing, the pipeline does not fail; it falls back to the existing `MockLLM` path.
+Базовый конфиг `configs/demo_fitness.yaml` намеренно закреплён на `llm_provider: mock`, чтобы demo-run по умолчанию оставался offline и детерминированным.
 
-### PowerShell Example
+Если ключ отсутствует, pipeline не падает: вместо Gemini-path используется существующий `MockLLM` fallback.
 
-Set the key for the current PowerShell session like this:
+---
+
+## Пример для PowerShell
+
+Задайте ключ в текущей PowerShell-сессии:
 
 ```powershell
 $env:GEMINI_API_KEY = 'your-gemini-api-key'
 ```
 
-Then run the pipeline with a config that explicitly sets `annotation.llm_provider: gemini`. You can either create a small separate config file for that purpose or temporarily change `llm_provider` in your own config before running it.
+После этого запустите pipeline с конфигом, в котором явно указан annotation.llm_provider: gemini. Для этого можно либо сделать отдельный config, либо временно поменять llm_provider в своём конфиге.
 
 ```powershell
 python run_pipeline.py --config configs/your_gemini_config.yaml
 ```
 
-This only affects the current shell session. It does not add any secret loader, vault integration, `.env` behavior, or UI.
+Этот способ влияет только на текущую shell-сессию. Он не добавляет .env-механику, secret loader, vault integration или UI.
 
-### How to Verify the Active Path
+---
 
-Check the annotation trace after a run:
+## Как проверить, какой путь реально отработал
 
-- Gemini path: `llm_mode == generate_parse`
-- Mock/offline path: `llm_mode == classify_effect`
+После запуска проверьте annotation trace:
 
-The trace is written to `data/interim/annotation_trace.json` and `reports/annotation_trace_report.md`.
+- Gemini-path: llm_mode == generate_parse
+- Mock/offline path: llm_mode == classify_effect
 
-This is an MVP integration, not production-ready secret management and not a full provider framework.
+Trace сохраняется в:
 
-The corrected review queue is still edited by a human separately in `data/interim/review_queue_corrected.csv`.
+- data/interim/annotation_trace.json
+- reports/annotation_trace_report.md
 
-If a corrected queue is present, the pipeline also writes `reports/review_merge_report.md` and `data/interim/review_merge_context.json` so the human merge step is visible and auditable. This is still an MVP, not a UI.
+Текущая интеграция — это MVP-расширение, а не production-ready secret management и не полноценный provider framework.
 
-After the quality stage, the pipeline now also writes a compact Russian EDA pack: `reports/eda_report.md` and `data/interim/eda_context.json`. This is a small reporting artifact layer for a quick first look at the dataset, not a BI dashboard or a full analytics application.
+Исправленный review queue по-прежнему редактируется человеком отдельно в data/interim/review_queue_corrected.csv.
 
-## Repository Structure
+Если corrected queue присутствует, pipeline дополнительно сохраняет:
 
-- `src/` - pipeline implementation, agents, services, providers, and ML helpers
-- `tests/` - unit, integration, and end-to-end tests
-- `configs/` - demo configs for offline runs
-- `data/` - generated artifacts from local runs
+- reports/review_merge_report.md
+- data/interim/review_merge_context.json
 
-## How to Run Offline Demos
+Это делает human merge step видимым и аудируемым. При этом текущая реализация остаётся file-based MVP, а не полноценным UI.
 
-Run the pipeline from the repository root with one of the persistent demo configs:
+После quality stage pipeline также сохраняет компактный русский EDA-pack:
+
+- reports/eda_report.md
+- data/interim/eda_context.json
+
+Это лёгкий слой отчётности для первичного анализа данных, а не BI-система и не полноценное аналитическое приложение.
+
+---
+
+## Структура репозитория
+
+- src/ — реализация pipeline, агентов, сервисов, провайдеров и ML-хелперов
+- tests/ — unit, integration и end-to-end тесты
+- configs/ — demo-конфиги для offline-запуска
+- data/ — артефакты локальных запусков
+
+---
+
+## Как запускать offline demo
+
+Запускайте pipeline из корня репозитория с одним из стабильных demo-конфигов:
 
 ```bash
 python run_pipeline.py --config configs/demo_fitness.yaml
 python run_pipeline.py --config configs/demo_minecraft.yaml
 ```
 
-These demo paths are designed to work offline and do not require network access.
+Эти demo-paths рассчитаны на offline-работу и не требуют сетевого доступа.
+
+---
 
 ## Hugging Face Discovery MVP
 
-For non-demo configs, source discovery can now query the public Hugging Face datasets search API using the request topic. This is a narrow discovery and shortlisting step only.
+Для non-demo конфигов source discovery может обращаться к публичному Hugging Face datasets search API по теме из запроса.
 
-For real Hugging Face candidates, discovery stores the canonical dataset id in `uri` and keeps the dataset page URL in metadata when relevant.
+Это узкий discovery и shortlisting step, а не полноценный online ingestion layer.
 
-If the online lookup fails, the service falls back safely instead of breaking the pipeline. The offline demo path remains unchanged and still uses the local deterministic payloads.
+Для реальных Hugging Face candidates discovery сохраняет:
+
+- канонический dataset id в uri;
+- page URL в metadata, когда это уместно.
+
+Если online lookup не удался, сервис безопасно делает fallback и не ломает pipeline. Offline demo path при этом не меняется и по-прежнему использует локальные детерминированные payloads.
+
+---
 
 ## GitHub Discovery MVP
 
-For non-demo configs, source discovery can also query the public GitHub repository search API using the current request topic.
+Для non-demo конфигов source discovery также может обращаться к публичному GitHub repository search API по текущей теме запроса.
 
-This is a discovery-only MVP. It maps real repository results into shortlist candidates, falls back safely on lookup failures, and does not add any GitHub collection logic.
+Это только discovery-level MVP. Он:
+
+- преобразует реальные результаты поиска в shortlist candidates;
+- безопасно делает fallback при lookup failure;
+- не добавляет полноценную GitHub collection-логику.
+
+---
 
 ## Hugging Face Collection MVP
 
-The online capability now also includes a narrow Hugging Face collection path for shortlisted datasets. The collection loader accepts either a Hugging Face dataset id or a Hugging Face dataset URL and normalizes it before loading.
+Online-capability также включает узкий Hugging Face collection path для shortlisted datasets.
 
-This is still not a full online pipeline. It is a focused discovery-and-collection MVP, while the offline demo mode remains the main reproducible coursework path.
+Loader принимает либо Hugging Face dataset id, либо Hugging Face dataset URL и нормализует его перед загрузкой.
+
+Это всё ещё не полный online pipeline, а ограниченное расширение discovery-and-collection поверх основного offline baseline.
+
+---
 
 ## Source Approval Gate MVP
 
-After discovery, shortlist candidates can be filtered through a minimal approval gate before any future collection step.
+После discovery shortlist candidates могут проходить через минимальный approval gate перед следующим collection step.
 
-The MVP uses a simple `data/raw/approved_sources.json` file containing a JSON list of approved `source_id` strings. If the file is missing, the shortlist helper returns the original shortlist unchanged.
+MVP использует простой файл data/raw/approved_sources.json, содержащий JSON-список одобренных source_id.
 
-This is a discovery-side approval checkpoint only. It is not a UI, not a production approval workflow, and it does not change the offline demo mode.
+Если файл отсутствует, shortlist helper возвращает исходный shortlist без изменений.
+
+Это discovery-side approval checkpoint, а не UI и не production approval workflow.
+
+---
 
 ## Approval-Aware Collection MVP
 
-The orchestration layer now applies the approval helper between discovery and collection. In practice, the pipeline discovers sources, filters them through `approved_sources.json` when present, and then passes the approved subset to collection.
+Оркестрационный слой применяет approval helper между discovery и collection.
 
-The approval-aware path now exposes simple file-based status semantics such as missing-file, applied, and empty-subset cases. This remains a file-based MVP, not a full approval subsystem, and it is intentionally narrow so the offline demo baseline stays intact.
+На практике pipeline:
 
-## Artifacts Produced
+- находит источники;
+- фильтрует shortlist через approved_sources.json, если файл присутствует;
+- передаёт в collection только approved subset.
 
-A successful demo run produces artifacts such as:
+Approval-aware path явно отражает file-based статусы вроде:
 
-- `final_report.md`
-- `data/interim/model_metrics.json`
-- `data/interim/review_queue.csv`
-- `reports/annotation_trace_report.md`
-- `data/interim/annotation_trace.json`
-- `reports/eda_report.md`
-- `data/interim/eda_context.json`
-- `data/raw/discovered_sources.json`
-- `data/raw/merged_raw.parquet`
+- missing-file
+- applied
+- empty-subset
 
-## Current Limitations
+Это остаётся узким MVP-решением, чтобы не ломать стабильный offline baseline.
 
-- Online discovery is not complete.
-- The online capability currently starts with Hugging Face datasets discovery and does not cover the full collection pipeline.
-- The online capability now includes Hugging Face discovery, GitHub repository discovery MVP, and a minimal Hugging Face collection MVP, but it is still not a full production-ready online pipeline.
-- The approval gate MVP is file-based and intentionally minimal; it only filters shortlist candidates by approved `source_id` values.
-- The source shortlist report is a Russian MVP for human review, not a full approval UI.
-- The `approval_candidates.json` artifact is a helper shortlist for review automation, not an approval decision file.
-- `review_queue.csv` is the manual review queue, `review_queue_report.md` is the Russian reviewer guide, and `review_queue_context.json` is a helper artifact for tooling.
-- `review_merge_report.md` and `review_merge_context.json` capture the outcome of manual merge after corrected labels are supplied.
-- The demo datasets are intentionally small and synthetic/local.
-- The offline demo path is meant for reproducible coursework-style runs, not for production use.
-- Some stages are intentionally deterministic to keep the baseline stable for local execution.
+---
+
+## Какие артефакты создаёт pipeline
+
+Успешный demo-run создаёт, например, такие артефакты:
+
+- final_report.md
+- data/interim/model_metrics.json
+- data/interim/review_queue.csv
+- reports/annotation_trace_report.md
+- data/interim/annotation_trace.json
+- reports/eda_report.md
+- data/interim/eda_context.json
+- data/raw/discovered_sources.json
+- data/raw/merged_raw.parquet
+
+---
+
+## Текущие ограничения
+
+- Online discovery пока не является полным.
+- Online-capability начинается с Hugging Face datasets discovery и не покрывает весь collection pipeline.
+- Текущий online-layer включает Hugging Face discovery, GitHub repository discovery MVP и минимальный Hugging Face collection MVP, но всё ещё не является полным production-ready online pipeline.
+- Approval gate реализован в file-based виде и намеренно оставлен минимальным: он фильтрует shortlist по approved source_id.
+- Source shortlist report — это русский MVP для human review, а не полноценный approval UI.
+- Артефакт approval_candidates.json — это helper shortlist для review/tooling-сценариев, а не approval decision file.
+- review_queue.csv — это manual review queue, review_queue_report.md — инструкция для reviewer, а review_queue_context.json — helper artifact для tooling.
+- review_merge_report.md и review_merge_context.json фиксируют результат ручного merge после подачи corrected labels.
+- Demo datasets намеренно маленькие и synthetic/local.
+- Offline demo path предназначен для воспроизводимых coursework-style запусков, а не для production use.
+- Некоторые этапы намеренно сделаны детерминированными, чтобы baseline оставался стабильным при локальном выполнении.

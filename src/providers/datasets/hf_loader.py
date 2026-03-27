@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib import import_module
+from urllib.parse import urlparse
 from typing import Any, Iterable
 
 
@@ -55,7 +56,7 @@ class HFDatasetLoader:
     def load(self, dataset_name: str, split: str = "train", streaming: bool = False) -> Any:
         """Load a dataset using the local datasets backend."""
 
-        return datasets.load_dataset(dataset_name, split=split, streaming=streaming)
+        return datasets.load_dataset(self._normalize_dataset_name(dataset_name), split=split, streaming=streaming)
 
     def to_dataframe(self, dataset: Any, limit: int | None = None) -> Any:
         """Convert list-like or tabular-like dataset inputs into a dataframe-like object."""
@@ -118,6 +119,26 @@ class HFDatasetLoader:
             return list(column_names)
 
         return []
+
+    def _normalize_dataset_name(self, dataset_name: str) -> str:
+        """Normalize dataset references so the loader accepts ids and Hugging Face URLs.
+
+        The collection contract can now pass either a plain dataset id or a Hugging Face dataset
+        URL. URLs are converted to the canonical dataset id path segment so downstream loading stays
+        predictable.
+        """
+
+        candidate = str(dataset_name).strip()
+        if not candidate:
+            return candidate
+
+        parsed = urlparse(candidate)
+        if parsed.scheme in {"http", "https"} and parsed.netloc.endswith("huggingface.co"):
+            path_parts = [part for part in parsed.path.split("/") if part]
+            if len(path_parts) >= 2 and path_parts[0] == "datasets":
+                return "/".join(path_parts[1:])
+
+        return candidate
 
     def _build_frame(self, records: list[dict[str, Any]], columns: list[str]) -> Any:
         """Build a pandas frame when available, otherwise use the local fallback."""

@@ -83,7 +83,7 @@ def test_collect_pipeline_hf_and_scrape_sources_return_canonical_schema(tmp_path
 
     result = agent.run(
         [
-            SourceCandidate("hf-1", "hf_dataset", "HF", "fitness-dataset"),
+            SourceCandidate("hf-1", "hf_dataset", "HF", "https://huggingface.co/datasets/fitness-dataset"),
             SourceCandidate("scrape-1", "scrape", "Web", str(tmp_path / "sample.html"), metadata={"html": html}),
         ]
     )

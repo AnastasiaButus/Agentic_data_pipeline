@@ -58,6 +58,12 @@ For non-demo configs, source discovery can now query the public Hugging Face dat
 
 If the online lookup fails, the service falls back safely instead of breaking the pipeline. The offline demo path remains unchanged and still uses the local deterministic payloads.
 
+## Hugging Face Collection MVP
+
+The online capability now also includes a narrow Hugging Face collection path for shortlisted datasets. The collection loader accepts either a Hugging Face dataset id or a Hugging Face dataset URL and normalizes it before loading.
+
+This is still not a full online pipeline. It is a focused discovery-and-collection MVP, while the offline demo mode remains the main reproducible coursework path.
+
 ## Source Approval Gate MVP
 
 After discovery, shortlist candidates can be filtered through a minimal approval gate before any future collection step.
@@ -80,6 +86,7 @@ A successful demo run produces artifacts such as:
 
 - Online discovery is not complete.
 - The online capability currently starts with Hugging Face datasets discovery and does not cover the full collection pipeline.
+- The online capability now includes Hugging Face discovery plus a minimal Hugging Face collection MVP, but it is still not a full production-ready online pipeline.
 - The approval gate MVP is file-based and intentionally minimal; it only filters shortlist candidates by approved `source_id` values.
 - The demo datasets are intentionally small and synthetic/local.
 - The offline demo path is meant for reproducible coursework-style runs, not for production use.

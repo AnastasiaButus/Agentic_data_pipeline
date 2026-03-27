@@ -24,7 +24,11 @@ class FakeRegistry:
 class StubHFLoader:
     """Return deterministic tabular data for hf_dataset collection tests."""
 
+    def __init__(self) -> None:
+        self.loaded_dataset_names: list[str] = []
+
     def load(self, dataset_name: str, split: str = "train", streaming: bool = False) -> list[dict[str, object]]:
+        self.loaded_dataset_names.append(dataset_name)
         return [
             {"text": "Great product", "rating": 5, "product_name": "Protein Powder"},
             {"text": "Great product", "rating": 5, "product_name": "Protein Powder"},
@@ -111,10 +115,33 @@ def test_data_collection_agent_run_on_hf_dataset_source(tmp_path: Path) -> None:
         registry=registry,
     )
 
-    result = agent.run([SourceCandidate("hf-1", "hf_dataset", "HF", "fitness-dataset")])
+    result = agent.run([SourceCandidate("hf-1", "hf_dataset", "HF", "https://huggingface.co/datasets/fitness-dataset")])
 
     assert list(result.columns) == ["id", "source", "text", "label", "rating", "created_at", "split", "meta_json"]
     assert result.to_dict(orient="records")[0]["source"] == "HF"
+    assert registry.saved is not None
+    assert registry.saved[0] == "data/raw/merged_raw.parquet"
+    assert agent.hf_loader.loaded_dataset_names == ["https://huggingface.co/datasets/fitness-dataset"]
+
+
+def test_hf_collection_failure_is_safe(tmp_path: Path) -> None:
+    """HF load failures should fall back to an empty frame instead of crashing collect."""
+
+    class FailingHFLoader(StubHFLoader):
+        def load(self, dataset_name: str, split: str = "train", streaming: bool = False) -> list[dict[str, object]]:
+            raise RuntimeError("hf unavailable")
+
+    registry = FakeRegistry()
+    agent = DataCollectionAgent(
+        _make_context(tmp_path),
+        hf_loader=FailingHFLoader(),
+        normalizer=StubNormalizer(),
+        registry=registry,
+    )
+
+    result = agent.run([SourceCandidate("hf-1", "hf_dataset", "HF", "https://huggingface.co/datasets/fitness-dataset")])
+
+    assert result.empty
     assert registry.saved is not None
     assert registry.saved[0] == "data/raw/merged_raw.parquet"
 

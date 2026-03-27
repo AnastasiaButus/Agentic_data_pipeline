@@ -88,8 +88,12 @@ class DataCollectionAgent(BaseAgent):
         """Collect one source using the appropriate local provider stub or loader."""
 
         if source.source_type == "hf_dataset":
-            dataset = self.hf_loader.load(source.uri)
-            return self.hf_loader.to_dataframe(dataset)
+            try:
+                dataset = self.hf_loader.load(source.uri)
+                return self.hf_loader.to_dataframe(dataset)
+            except Exception:
+                self.logger.warning("Skipping hf_dataset source during collect stage: %s", source.uri)
+                return self._empty_frame()
 
         if source.source_type == "scrape":
             html = self._load_html(source)

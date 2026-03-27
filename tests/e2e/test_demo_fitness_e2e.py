@@ -50,6 +50,9 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert (tmp_path / "final_report.md").exists()
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
     assert "## Approval" in final_report
+    assert "## EDA" in final_report
+    assert "eda_report_path" in final_report
+    assert "eda_context_path" in final_report
     assert "approval_status: skipped_missing_file" in final_report
     assert "review_merge_report_path" in final_report
     approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
@@ -64,6 +67,13 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert review_queue_context["confidence_threshold"] == loaded_config.annotation.confidence_threshold
     assert review_queue_context["n_rows"] >= 0
     assert review_queue_context["label_options"] == loaded_config.annotation.effect_labels
+    eda_report = (tmp_path / "reports" / "eda_report.md").read_text(encoding="utf-8")
+    assert "EDA-пакет" in eda_report
+    assert "Это краткий честный EDA-отчет" in eda_report
+    eda_context = json.loads((tmp_path / "data" / "interim" / "eda_context.json").read_text(encoding="utf-8"))
+    assert "n_rows" in eda_context
+    assert "columns" in eda_context
+    assert "missing_values_summary" in eda_context
     merge_report = (tmp_path / "reports" / "review_merge_report.md").read_text(encoding="utf-8")
     assert "Merge не выполнен" in merge_report
     assert "corrected queue отсутствует" in merge_report
@@ -80,3 +90,5 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert "Fitness Supplements Offline Demo" in (tmp_path / "data" / "raw" / "discovered_sources.json").read_text(encoding="utf-8")
     assert captured_report["summary"]["approval"]["approval_status"] == "skipped_missing_file"
+    assert Path(captured_report["summary"]["eda"]["eda_report_path"]).as_posix() == "reports/eda_report.md"
+    assert Path(captured_report["summary"]["eda"]["eda_context_path"]).as_posix() == "data/interim/eda_context.json"

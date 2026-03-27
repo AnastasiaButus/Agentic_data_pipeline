@@ -44,6 +44,8 @@ The corrected review queue is still edited by a human separately in `data/interi
 
 If a corrected queue is present, the pipeline also writes `reports/review_merge_report.md` and `data/interim/review_merge_context.json` so the human merge step is visible and auditable. This is still an MVP, not a UI.
 
+After the quality stage, the pipeline now also writes a compact Russian EDA pack: `reports/eda_report.md` and `data/interim/eda_context.json`. This is a small reporting artifact layer for a quick first look at the dataset, not a BI dashboard or a full analytics application.
+
 ## Repository Structure
 
 - `src/` - pipeline implementation, agents, services, providers, and ML helpers
@@ -103,6 +105,8 @@ A successful demo run produces artifacts such as:
 - `final_report.md`
 - `data/interim/model_metrics.json`
 - `data/interim/review_queue.csv`
+- `reports/eda_report.md`
+- `data/interim/eda_context.json`
 - `data/raw/discovered_sources.json`
 - `data/raw/merged_raw.parquet`
 

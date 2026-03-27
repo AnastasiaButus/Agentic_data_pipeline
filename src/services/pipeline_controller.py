@@ -68,6 +68,8 @@ class PipelineController:
         quality_report = self.quality_agent.detect_issues(collected)
         cleaned = self.quality_agent.run(collected)
         quality_report_path = self.reporting_service.write_quality_report(quality_report)
+        eda_report_path = self.reporting_service.write_eda_report(cleaned)
+        eda_context_path = self.reporting_service.write_eda_context(cleaned)
 
         annotated = self.annotation_agent.auto_label(cleaned)
         annotation_summary = self.annotation_agent.check_quality(annotated)
@@ -139,6 +141,11 @@ class PipelineController:
                     "quality_report_path": quality_report_path,
                     "warnings": getattr(quality_report, "warnings", []),
                 },
+                "eda": {
+                    "eda_report_path": eda_report_path,
+                    "eda_context_path": eda_context_path,
+                    "n_rows": len(self._to_records(cleaned)),
+                },
                 "annotation": {
                     "annotation_report_path": annotation_report_path,
                     "confidence_threshold": annotation_summary.get("confidence_threshold"),
@@ -178,6 +185,8 @@ class PipelineController:
             "reports": {
                 "source_report": source_report_path,
                 "quality_report": quality_report_path,
+                "eda_report": eda_report_path,
+                "eda_context": eda_context_path,
                 "annotation_report": annotation_report_path,
                 "review_queue_report": review_queue_report_path,
                 "review_queue_context": review_queue_context_path,

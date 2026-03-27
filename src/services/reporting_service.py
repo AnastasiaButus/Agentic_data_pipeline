@@ -86,6 +86,103 @@ class ReportingService:
         self.registry.save_markdown(path, "\n".join(lines))
         return path
 
+    def write_eda_report(self, df_like: Any) -> str:
+        """Write a compact Russian EDA report for the post-quality dataset."""
+
+        summary = self._build_eda_summary(df_like)
+        lines = [
+            "# EDA-пакет по данным после quality",
+            "",
+            "Это краткий честный EDA-отчет по данным, которые реально идут дальше в pipeline.",
+            "Он не подменяет пустые поля выдуманной статистикой и не пытается быть BI-инструментом.",
+            "",
+            f"- n_rows: {summary['n_rows']}",
+            f"- columns: {', '.join(summary['columns']) if summary['columns'] else 'нет'}",
+            "",
+            "## Распределение source",
+        ]
+
+        source_distribution = summary["source_distribution"]
+        if source_distribution["available"]:
+            lines.append(f"- {self._format_count_map(source_distribution['counts'])}")
+        else:
+            lines.append(f"- {self._describe_absence(source_distribution)}")
+
+        lines.extend([
+            "",
+            "## Распределение effect_label",
+        ])
+        effect_label_distribution = summary["effect_label_distribution"]
+        if effect_label_distribution["available"]:
+            lines.append(f"- {self._format_count_map(effect_label_distribution['counts'])}")
+        else:
+            lines.append(f"- {self._describe_absence(effect_label_distribution)}")
+
+        lines.extend([
+            "",
+            "## Сводка rating",
+        ])
+        rating_summary = summary["rating_summary"]
+        if rating_summary["available"]:
+            lines.extend([
+                f"- valid_count: {rating_summary['valid_count']}",
+                f"- missing_or_invalid_count: {rating_summary['missing_or_invalid_count']}",
+                f"- min: {self._format_numeric(rating_summary['min'])}",
+                f"- max: {self._format_numeric(rating_summary['max'])}",
+                f"- mean: {self._format_numeric(rating_summary['mean'])}",
+            ])
+        else:
+            lines.append(f"- {self._describe_absence(rating_summary)}")
+
+        lines.extend([
+            "",
+            "## Длина text",
+        ])
+        text_length_summary = summary["text_length_summary"]
+        if text_length_summary["available"]:
+            lines.extend([
+                f"- valid_count: {text_length_summary['valid_count']}",
+                f"- missing_or_invalid_count: {text_length_summary['missing_or_invalid_count']}",
+                f"- min_chars: {self._format_numeric(text_length_summary['min_chars'])}",
+                f"- max_chars: {self._format_numeric(text_length_summary['max_chars'])}",
+                f"- mean_chars: {self._format_numeric(text_length_summary['mean_chars'])}",
+            ])
+        else:
+            lines.append(f"- {self._describe_absence(text_length_summary)}")
+
+        lines.extend([
+            "",
+            "## Пропуски по ключевым колонкам",
+        ])
+        missing_values_summary = summary["missing_values_summary"]
+        if missing_values_summary:
+            for column_name, column_summary in missing_values_summary.items():
+                if column_summary["available"]:
+                    lines.append(
+                        f"- {column_name}: missing_count={column_summary['missing_count']} / {summary['n_rows']}"
+                    )
+                else:
+                    lines.append(f"- {column_name}: {self._describe_absence(column_summary)}")
+        else:
+            lines.append("- Ключевые колонки не найдены.")
+
+        if summary["notes"]:
+            lines.extend(["", "## Примечания"])
+            for note in summary["notes"]:
+                lines.append(f"- {note}")
+
+        path = Path("reports/eda_report.md")
+        self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
+        return str(path)
+
+    def write_eda_context(self, df_like: Any) -> str:
+        """Write the machine-readable helper artifact for the EDA pack."""
+
+        summary = self._build_eda_summary(df_like)
+        path = Path("data/interim/eda_context.json")
+        self.registry.save_json(path, summary)
+        return str(path)
+
     def write_annotation_report(self, df_labeled: Any, annotation_summary: dict[str, Any] | None = None) -> str:
         """Write a monitoring report that emphasizes effect labels and confidence."""
 
@@ -281,9 +378,20 @@ class ReportingService:
         """Write the final end-to-end markdown report for the demo pipeline."""
 
         lines = ["# Final Report", ""]
-        for section_name in ["sources", "quality", "annotation", "review", "approval", "active_learning", "training", "artifacts"]:
+        section_titles = {
+            "sources": "Sources",
+            "quality": "Quality",
+            "eda": "EDA",
+            "annotation": "Annotation",
+            "review": "Review",
+            "approval": "Approval",
+            "active_learning": "Active Learning",
+            "training": "Training",
+            "artifacts": "Artifacts",
+        }
+        for section_name in ["sources", "quality", "eda", "annotation", "review", "approval", "active_learning", "training", "artifacts"]:
             section = summary.get(section_name)
-            lines.append(f"## {section_name.replace('_', ' ').title()}")
+            lines.append(f"## {section_titles[section_name]}")
             lines.append("")
             if isinstance(section, dict):
                 for key, value in section.items():
@@ -377,6 +485,166 @@ class ReportingService:
             parts.append(f"{key}={value}")
 
         return ", ".join(parts)
+
+    def _build_eda_summary(self, df_like: Any) -> dict[str, Any]:
+        """Summarize the post-quality dataframe-like input without inventing values."""
+
+        rows = self._to_records(df_like)
+        columns = self._collect_columns(rows)
+        notes: list[str] = []
+
+        if not rows:
+            notes.append("Датасет пустой, поэтому статистика ограничена структурой входа.")
+
+        source_distribution = self._build_distribution_summary(rows, "source")
+        effect_label_distribution = self._build_distribution_summary(rows, "effect_label")
+        rating_summary = self._build_numeric_summary(rows, "rating")
+        text_length_summary = self._build_text_length_summary(rows, "text")
+        missing_values_summary = self._build_missing_values_summary(rows, ["source", "effect_label", "rating", "text"])
+
+        if not columns:
+            notes.append("Колонки не были переданы в dataframe-like input или не удалось извлечь записи.")
+
+        return {
+            "n_rows": len(rows),
+            "columns": columns,
+            "source_distribution": source_distribution,
+            "effect_label_distribution": effect_label_distribution,
+            "rating_summary": rating_summary,
+            "text_length_summary": text_length_summary,
+            "missing_values_summary": missing_values_summary,
+            "notes": notes,
+        }
+
+    def _collect_columns(self, rows: list[dict[str, Any]]) -> list[str]:
+        """Collect columns in first-seen order from row dictionaries."""
+
+        columns: list[str] = []
+        for row in rows:
+            for key in row.keys():
+                normalized_key = self._normalize_text(key)
+                if normalized_key and normalized_key not in columns:
+                    columns.append(normalized_key)
+        return columns
+
+    def _build_distribution_summary(self, rows: list[dict[str, Any]], column_name: str) -> dict[str, Any]:
+        """Count categorical values only when the requested column is present."""
+
+        if not rows or column_name not in self._collect_columns(rows):
+            return {"available": False, "reason": "column_absent"}
+
+        counts: dict[str, int] = {}
+        for row in rows:
+            value = self._normalize_text(row.get(column_name))
+            if not value:
+                continue
+            counts[value] = counts.get(value, 0) + 1
+
+        if not counts:
+            return {"available": False, "reason": "no_values"}
+
+        return {"available": True, "column": column_name, "counts": counts}
+
+    def _build_numeric_summary(self, rows: list[dict[str, Any]], column_name: str) -> dict[str, Any]:
+        """Summarize numeric values without clamping or synthetic defaults."""
+
+        if not rows or column_name not in self._collect_columns(rows):
+            return {"available": False, "reason": "column_absent"}
+
+        values: list[float] = []
+        for row in rows:
+            value = row.get(column_name)
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                continue
+            if numeric_value != numeric_value:
+                continue
+            values.append(numeric_value)
+
+        if not values:
+            return {"available": False, "reason": "no_numeric_values"}
+
+        return {
+            "available": True,
+            "column": column_name,
+            "valid_count": len(values),
+            "missing_or_invalid_count": len(rows) - len(values),
+            "min": min(values),
+            "max": max(values),
+            "mean": sum(values) / len(values),
+        }
+
+    def _build_text_length_summary(self, rows: list[dict[str, Any]], column_name: str) -> dict[str, Any]:
+        """Summarize text length in characters for the existing text column."""
+
+        if not rows or column_name not in self._collect_columns(rows):
+            return {"available": False, "reason": "column_absent"}
+
+        lengths: list[int] = []
+        for row in rows:
+            value = row.get(column_name)
+            if value is None:
+                continue
+            lengths.append(len(self._normalize_text(value)))
+
+        if not lengths:
+            return {"available": False, "reason": "no_text_values"}
+
+        return {
+            "available": True,
+            "column": column_name,
+            "valid_count": len(lengths),
+            "missing_or_invalid_count": len(rows) - len(lengths),
+            "min_chars": min(lengths),
+            "max_chars": max(lengths),
+            "mean_chars": sum(lengths) / len(lengths),
+        }
+
+    def _build_missing_values_summary(self, rows: list[dict[str, Any]], key_columns: list[str]) -> dict[str, Any]:
+        """Summarize missing values for the columns the report cares about most."""
+
+        columns = self._collect_columns(rows)
+        summary: dict[str, Any] = {}
+        for column_name in key_columns:
+            if column_name not in columns:
+                summary[column_name] = {"available": False, "reason": "column_absent"}
+                continue
+
+            missing_count = 0
+            for row in rows:
+                if not self._normalize_text(row.get(column_name)):
+                    missing_count += 1
+
+            summary[column_name] = {
+                "available": True,
+                "column": column_name,
+                "missing_count": missing_count,
+                "missing_fraction": missing_count / len(rows) if rows else 0.0,
+            }
+
+        return summary
+
+    def _format_count_map(self, counts: dict[str, int]) -> str:
+        """Render a short value-count list for markdown reports."""
+
+        if not counts:
+            return "нет значений"
+        return ", ".join(f"{key}: {value}" for key, value in counts.items())
+
+    def _describe_absence(self, payload: dict[str, Any]) -> str:
+        """Explain why a metric is unavailable in a concise Russian phrase."""
+
+        reason = payload.get("reason", "unknown")
+        if reason == "column_absent":
+            return "колонка отсутствует"
+        if reason == "no_values":
+            return "колонка есть, но значений нет"
+        if reason == "no_numeric_values":
+            return "числовые значения не найдены"
+        if reason == "no_text_values":
+            return "текстовые значения не найдены"
+        return f"недоступно: {reason}"
 
     def _candidate_to_approval_record(self, candidate: Any) -> dict[str, Any]:
         """Convert a shortlist candidate into a stable helper artifact row.

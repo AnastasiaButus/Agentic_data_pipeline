@@ -29,6 +29,9 @@
 
 - status: skipped_missing_corrected_queue
 - review_queue_rows: 0
+- review_required: False
+- reviewer_action: review queue already processed or not required
+- next_step: active learning and training completed for current run
 - review_queue_report_path: reports\review_queue_report.md
 - review_queue_context_path: data\interim\review_queue_context.json
 - review_merge_report_path: reports\review_merge_report.md

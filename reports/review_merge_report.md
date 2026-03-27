@@ -7,3 +7,7 @@
 - review_status: skipped_missing_corrected_queue
 
 Merge не выполнен, потому что corrected queue отсутствует.
+
+## Next step
+
+- Если нужна ручная валидация, заполните corrected queue и перезапустите pipeline.

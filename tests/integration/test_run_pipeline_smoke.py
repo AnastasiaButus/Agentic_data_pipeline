@@ -53,6 +53,8 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert "annotation_trace_report_path" in final_report
     assert "annotation_trace_context_path" in final_report
     assert "approval_status: skipped_missing_file" in final_report
+    assert "review_required:" in final_report
+    assert "next_step:" in final_report
     approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
     assert isinstance(approval_candidates, list)
     assert len(approval_candidates) == 1
@@ -61,10 +63,15 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     review_queue_report = (tmp_path / "reports" / "review_queue_report.md").read_text(encoding="utf-8")
     assert "# Очередь ручной проверки" in review_queue_report
     assert "ручной проверки после авторазметки" in review_queue_report
+    assert "## Reviewer guide" in review_queue_report
+    assert "## Next step" in review_queue_report
     review_queue_context = json.loads((tmp_path / "data" / "interim" / "review_queue_context.json").read_text(encoding="utf-8"))
     assert review_queue_context["confidence_threshold"] == loaded_config.annotation.confidence_threshold
     assert review_queue_context["n_rows"] >= 0
     assert review_queue_context["label_options"] == loaded_config.annotation.effect_labels
+    assert "review_required" in review_queue_context
+    assert review_queue_context["current_stage"] == "human_review"
+    assert "next_step" in review_queue_context
     annotation_trace_report = (tmp_path / "reports" / "annotation_trace_report.md").read_text(encoding="utf-8")
     assert "Трассировка annotation contract" in annotation_trace_report
     assert "Верни только JSON" in annotation_trace_report
@@ -1017,6 +1024,8 @@ def test_review_pack_aligns_with_annotation_summary_and_vocabulary(monkeypatch, 
     assert review_queue_context["confidence_threshold"] == 0.6
     assert review_queue_context["label_options"] == ["energy", "side_effects", "other"]
     assert review_queue_context["n_rows"] == 1
+    assert review_queue_context["review_required"] is True
+    assert review_queue_context["next_step"] == "fill_corrected_queue_and_rerun"
     assert result["approval_status"] == "skipped_missing_file"
 
 
@@ -1146,6 +1155,7 @@ def test_review_merge_report_marks_changed_effect_labels(monkeypatch, tmp_path: 
     assert "# Результат ручного merge" in merge_report
     assert "corrected queue" in merge_report.lower() or "corrected_queue_found" in merge_report
     assert "n_effect_label_changes: 1" in merge_report
+    assert "## Next step" in merge_report
     merge_context = json.loads((tmp_path / "data" / "interim" / "review_merge_context.json").read_text(encoding="utf-8"))
     assert merge_context["corrected_queue_found"] is True
     assert merge_context["n_corrected_rows"] == 2
@@ -1413,6 +1423,7 @@ def test_review_merge_status_merged_no_changes_when_corrected_queue_has_no_effec
     merge_report = (tmp_path / "reports" / "review_merge_report.md").read_text(encoding="utf-8")
     assert "# Результат ручного merge" in merge_report
     assert "review_status: merged_no_changes" in merge_report
+    assert "## Next step" in merge_report
     merge_context = json.loads((tmp_path / "data" / "interim" / "review_merge_context.json").read_text(encoding="utf-8"))
     assert merge_context["corrected_queue_found"] is True
     assert merge_context["n_corrected_rows"] == 2
@@ -1551,6 +1562,7 @@ def test_review_merge_status_stays_merged_when_corrected_queue_has_effect_change
     assert "# Результат ручного merge" in merge_report
     assert "review_status: merged" in merge_report
     assert "n_effect_label_changes: 1" in merge_report
+    assert "## Next step" in merge_report
     merge_context = json.loads((tmp_path / "data" / "interim" / "review_merge_context.json").read_text(encoding="utf-8"))
     assert merge_context["corrected_queue_found"] is True
     assert merge_context["n_corrected_rows"] == 2

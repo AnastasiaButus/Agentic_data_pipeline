@@ -118,6 +118,8 @@ class PipelineController:
         review_queue = self.review_queue_service.export_low_confidence_queue(annotated, threshold=review_threshold)
         review_queue_report_path = self.reporting_service.write_review_queue_report(review_queue, review_threshold, label_options)
         review_queue_context_path = self.reporting_service.write_review_queue_context(review_queue, review_threshold, label_options)
+        review_queue_rows = len(self._to_records(review_queue))
+        review_required = review_queue_rows > 0
 
         reviewed = annotated
         review_status = "skipped_missing_corrected_queue"
@@ -198,7 +200,18 @@ class PipelineController:
                 },
                 "review": {
                     "status": review_status,
-                    "review_queue_rows": len(self._to_records(review_queue)),
+                    "review_queue_rows": review_queue_rows,
+                    "review_required": review_required,
+                    "reviewer_action": (
+                        "fill data/interim/review_queue_corrected.csv and rerun pipeline"
+                        if review_required and corrected_queue is None
+                        else "review queue already processed or not required"
+                    ),
+                    "next_step": (
+                        "human review rerun recommended before final retrain"
+                        if review_required and corrected_queue is None
+                        else "active learning and training completed for current run"
+                    ),
                     "review_queue_report_path": review_queue_report_path,
                     "review_queue_context_path": review_queue_context_path,
                     "review_merge_report_path": review_merge_report_path,

@@ -484,6 +484,13 @@ class ReportingService:
             "",
             "Это очередь примеров для ручной проверки после авторазметки.",
             "",
+            "## Текущий этап",
+            "",
+            "- Этап pipeline: human review / HITL",
+            "- Цель: проверить low-confidence примеры до retrain и финального обучения",
+            "",
+            "## Reviewer guide",
+            "",
             f"- Входной файл очереди: {input_queue_path}",
             f"- Порог confidence: {self._format_numeric(confidence_threshold)}",
             f"- Строк в очереди: {len(rows)}",
@@ -494,8 +501,28 @@ class ReportingService:
         ]
 
         if not rows:
-            lines.append("Очередь пуста, ручная проверка не требуется.")
+            lines.extend(
+                [
+                    "Очередь пуста, ручная проверка не требуется.",
+                    "",
+                    "## Next step",
+                    "",
+                    "- Следующий шаг: active learning / training могут использовать текущий reviewed dataset без ручных правок.",
+                ]
+            )
         else:
+            lines.extend(
+                [
+                    "## To-do reviewer",
+                    "",
+                    "1. Откройте `data/interim/review_queue.csv`.",
+                    "2. Для спорных строк заполните `reviewed_effect_label`.",
+                    "3. При необходимости добавьте `review_comment` и выставьте `human_verified=true`.",
+                    "4. Сохраните исправленный файл как `data/interim/review_queue_corrected.csv`.",
+                    "5. Перезапустите pipeline, чтобы merge применил ручные правки.",
+                    "",
+                ]
+            )
             lines.append("## Примеры для проверки")
             lines.append("")
             for row in rows:
@@ -508,6 +535,14 @@ class ReportingService:
                         text=self._normalize_text(row.get("text")),
                     )
                 )
+            lines.extend(
+                [
+                    "",
+                    "## Next step",
+                    "",
+                    "- Следующий шаг: загрузить corrected queue и повторно запустить pipeline для merge -> retrain.",
+                ]
+            )
 
         path = Path("reports/review_queue_report.md")
         self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
@@ -528,6 +563,20 @@ class ReportingService:
             "label_options": list(label_options),
             "input_queue_path": "data/interim/review_queue.csv",
             "expected_corrected_queue_path": "data/interim/review_queue_corrected.csv",
+            "review_required": bool(rows),
+            "current_stage": "human_review",
+            "next_step": "fill_corrected_queue_and_rerun" if rows else "continue_to_active_learning_and_training",
+            "review_columns": [
+                "id",
+                "source",
+                "text",
+                "label",
+                "effect_label",
+                "confidence",
+                "reviewed_effect_label",
+                "review_comment",
+                "human_verified",
+            ],
         }
         path = Path("data/interim/review_queue_context.json")
         self.registry.save_json(path, payload)
@@ -559,6 +608,10 @@ class ReportingService:
             lines.extend([
                 "",
                 "Merge не выполнен, потому что corrected queue отсутствует.",
+                "",
+                "## Next step",
+                "",
+                "- Если нужна ручная валидация, заполните corrected queue и перезапустите pipeline.",
             ])
         else:
             lines.extend([
@@ -567,6 +620,20 @@ class ReportingService:
                 f"- n_effect_label_changes: {n_effect_label_changes}",
                 f"- reviewed_effect_labels: {', '.join(reviewed_effect_labels) if reviewed_effect_labels else 'нет'}",
             ])
+            if review_status == "merged":
+                lines.extend([
+                    "",
+                    "## Next step",
+                    "",
+                    "- Ручные правки применены. Следующий шаг: retrain / active learning на reviewed dataset.",
+                ])
+            else:
+                lines.extend([
+                    "",
+                    "## Next step",
+                    "",
+                    "- Corrected queue обработан, но effect labels не изменились. Можно продолжать training на текущем датасете.",
+                ])
 
         path = Path("reports/review_merge_report.md")
         self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")

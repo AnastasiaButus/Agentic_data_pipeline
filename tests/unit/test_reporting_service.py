@@ -97,3 +97,56 @@ def test_eda_html_report_is_created(tmp_path: Path) -> None:
     assert "EDA Report" in html
     assert "Raw vs cleaned" in html
     assert "Charts" in html
+
+
+def test_review_queue_report_and_context_make_hitl_steps_explicit(tmp_path: Path) -> None:
+    """The review queue artifacts should tell the reviewer what to do next."""
+
+    service = ReportingService(_make_context(tmp_path))
+    review_queue = _Frame(
+        [
+            {
+                "id": "1",
+                "source": "HF",
+                "text": "energy boost",
+                "label": None,
+                "effect_label": "energy",
+                "confidence": 0.42,
+            }
+        ]
+    )
+
+    report_path = service.write_review_queue_report(review_queue, 0.6, ["energy", "side_effects", "other"])
+    context_path = service.write_review_queue_context(review_queue, 0.6, ["energy", "side_effects", "other"])
+
+    report = (tmp_path / report_path).read_text(encoding="utf-8")
+    payload = json.loads((tmp_path / context_path).read_text(encoding="utf-8"))
+
+    assert "## Reviewer guide" in report
+    assert "## To-do reviewer" in report
+    assert "review_queue_corrected.csv" in report
+    assert "## Next step" in report
+    assert payload["review_required"] is True
+    assert payload["current_stage"] == "human_review"
+    assert payload["next_step"] == "fill_corrected_queue_and_rerun"
+    assert "reviewed_effect_label" in payload["review_columns"]
+
+
+def test_review_merge_report_explains_next_step(tmp_path: Path) -> None:
+    """The merge report should explain what happens after HITL merge."""
+
+    service = ReportingService(_make_context(tmp_path))
+
+    report_path = service.write_review_merge_report(
+        corrected_queue_found=True,
+        corrected_queue_path="data/interim/review_queue_corrected.csv",
+        n_corrected_rows=1,
+        n_rows_with_reviewed_effect_label=1,
+        n_effect_label_changes=1,
+        reviewed_effect_labels=["side_effects"],
+        review_status="merged",
+    )
+    report = (tmp_path / report_path).read_text(encoding="utf-8")
+
+    assert "## Next step" in report
+    assert "retrain / active learning" in report

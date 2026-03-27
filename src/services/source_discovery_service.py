@@ -135,6 +135,11 @@ class SourceDiscoveryService:
     def run(self) -> list[SourceCandidate]:
         """Run discovery, rank the results, and persist the serialized output."""
 
+        demo_candidates = self._demo_candidates()
+        if demo_candidates:
+            self.registry.save_json("data/raw/discovered_sources.json", [candidate.as_dict() for candidate in demo_candidates])
+            return demo_candidates
+
         candidates = (
             self.search_huggingface()
             + self.search_internal_apis()
@@ -145,3 +150,72 @@ class SourceDiscoveryService:
         ranked = self.rank_candidates(candidates)
         self.registry.save_json("data/raw/discovered_sources.json", [candidate.as_dict() for candidate in ranked])
         return ranked
+
+    def _demo_candidates(self) -> list[SourceCandidate]:
+        """Return local, offline source candidates for the persistent demo configs."""
+
+        demo_key = self._demo_key()
+        if demo_key is None:
+            return []
+
+        if demo_key == "fitness":
+            return [
+                SourceCandidate(
+                    source_id="demo_fitness_scrape",
+                    source_type="scrape",
+                    title="Fitness Supplements Offline Demo",
+                    uri="demo://fitness-supplements",
+                    score=1.0,
+                    metadata={"html": self._fitness_demo_html(), "demo_mode": True, "topic": self.ctx.config.request.topic},
+                )
+            ]
+
+        if demo_key == "minecraft":
+            return [
+                SourceCandidate(
+                    source_id="demo_minecraft_scrape",
+                    source_type="scrape",
+                    title="Minecraft Instructions Offline Demo",
+                    uri="demo://minecraft-instructions",
+                    score=1.0,
+                    metadata={"html": self._minecraft_demo_html(), "demo_mode": True, "topic": self.ctx.config.request.topic},
+                )
+            ]
+
+        return []
+
+    def _demo_key(self) -> str | None:
+        """Map the active config to a known offline demo payload when appropriate."""
+
+        project = getattr(self.ctx, "config", None)
+        project_name = str(getattr(getattr(project, "project", None), "name", ""))
+
+        # Demo mode is now keyed only by explicit project identity so future real-run
+        # configs that reuse the same topic cannot accidentally enter the offline path.
+        if project_name == "universal-agentic-data-pipeline-fitness-demo":
+            return "fitness"
+        if project_name == "universal-agentic-data-pipeline-minecraft-demo":
+            return "minecraft"
+        return None
+
+    def _fitness_demo_html(self) -> str:
+        """Return a local HTML payload with fitness supplement review blocks."""
+
+        return (
+            "<html><body>"
+            '<div class="review" data-text="Fitness review: energy boost from a supplement" data-rating="5">Great energy and workout support</div>'
+            '<div class="review" data-text="Fitness review: side effect warning after protein powder" data-rating="1">Upset stomach side effect</div>'
+            '<div class="review" data-text="Fitness review: balanced supplement routine" data-rating="3">Neutral supplement experience</div>'
+            '</body></html>'
+        )
+
+    def _minecraft_demo_html(self) -> str:
+        """Return a local HTML payload with minecraft instruction review blocks."""
+
+        return (
+            "<html><body>"
+            '<div class="review" data-text="Minecraft review: energy tip for long survival builds" data-rating="5">Helpful building guide</div>'
+            '<div class="review" data-text="Minecraft review: side effect warning from risky potion use" data-rating="1">Potion side effect note</div>'
+            '<div class="review" data-text="Minecraft review: crafting instructions for redstone tools" data-rating="3">Crafting instructions summary</div>'
+            '</body></html>'
+        )

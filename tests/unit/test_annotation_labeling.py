@@ -48,6 +48,17 @@ def _make_context(tmp_path: Path) -> PipelineContext:
     return PipelineContext.from_config(config)
 
 
+def _make_context_with_effect_labels(tmp_path: Path, effect_labels: list[str]) -> PipelineContext:
+    """Build a minimal pipeline context with a custom effect-label vocabulary."""
+
+    config = AppConfig(
+        project=ProjectConfig(name="minecraft-demo", root_dir=tmp_path),
+        source=SourceConfig(use_huggingface=True),
+        annotation=AnnotationConfig(confidence_threshold=0.6, effect_labels=effect_labels),
+    )
+    return PipelineContext.from_config(config)
+
+
 def test_auto_label_adds_annotation_columns_and_preserves_canonical_schema(tmp_path: Path) -> None:
     """Auto-labeling should keep the canonical schema and add annotation columns on top."""
 
@@ -135,3 +146,28 @@ def test_check_quality_reports_core_metrics(tmp_path: Path) -> None:
     assert "label_dist" in report
     assert "confidence_mean" in report
     assert "n_low_confidence" in report
+
+
+def test_auto_label_uses_configured_effect_labels(tmp_path: Path) -> None:
+    """Minecraft configs should drive the effect-label vocabulary used by auto-labeling."""
+
+    effect_labels = ["crafting", "combat", "enchantments"]
+    agent = AnnotationAgent(
+        _make_context_with_effect_labels(tmp_path, effect_labels),
+        llm_client=MockLLM(),
+        registry=FakeRegistry(),
+    )
+
+    labeled = agent.auto_label(
+        _Frame(
+            [
+                {"id": "1", "source": "Web", "text": "Crafting instructions for a better build.", "label": None, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+                {"id": "2", "source": "Web", "text": "Combat tips for the arena.", "label": None, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+                {"id": "3", "source": "Web", "text": "Enchantments help with progression.", "label": None, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+            ]
+        )
+    )
+
+    rows = labeled.to_dict(orient="records")
+
+    assert [row["effect_label"] for row in rows] == effect_labels

@@ -31,7 +31,7 @@ source:
   max_sources: 3
 
 annotation:
-  use_llm: false
+  use_llm: true
   confidence_threshold: 0.6
   effect_labels:
     - energy

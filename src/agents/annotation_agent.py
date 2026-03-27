@@ -58,13 +58,15 @@ class AnnotationAgent(BaseAgent):
     def generate_spec(self, df: Any, task: str) -> str:
         """Render a deterministic markdown annotation spec for human review and future export."""
 
+        effect_labels = self._effect_label_vocabulary()
+
         spec = AnnotationSpec(
             name=f"{self._slugify(task)}_annotation_spec",
             description=f"Annotation guide for {task} using the canonical text/id/label contract.",
             text_field="text",
             label_field="label",
             id_field="id",
-            labels=["negative", "neutral", "positive", *EFFECT_LABELS],
+            labels=["negative", "neutral", "positive", *effect_labels],
             instructions=[
                 "Use the canonical text field for review text.",
                 "Keep id stable and never invent new record identifiers.",
@@ -81,11 +83,12 @@ class AnnotationAgent(BaseAgent):
 
         rows = self._to_records(df)
         output_rows: list[dict[str, Any]] = []
+        effect_labels = self._effect_label_vocabulary()
 
         for row in rows:
             canonical_row = self._canonicalize_row(row)
             sentiment_label = self.map_rating_to_sentiment(canonical_row.get("rating"))
-            effect_label, confidence = self._predict_effect(canonical_row.get("text"))
+            effect_label, confidence = self._predict_effect(canonical_row.get("text"), effect_labels)
             canonical_row.update(
                 {
                     "sentiment_label": sentiment_label,
@@ -136,21 +139,27 @@ class AnnotationAgent(BaseAgent):
         validate_labelstudio_tasks(tasks)
         return tasks
 
-    def _predict_effect(self, text: Any) -> tuple[str, float]:
+    def _predict_effect(self, text: Any, effect_labels: list[str] | None = None) -> tuple[str, float]:
+        """Predict an effect label using the optional LLM client or a deterministic fallback."""
+
+        vocabulary = effect_labels if effect_labels is not None else self._effect_label_vocabulary()
+        return self._predict_effect_with_vocab(text, vocabulary)
+
+    def _predict_effect_with_vocab(self, text: Any, effect_labels: list[str]) -> tuple[str, float]:
         """Predict an effect label using the optional LLM client or a deterministic fallback."""
 
         if self.llm_client is not None and hasattr(self.llm_client, "classify_effect"):
             try:
-                result = self.llm_client.classify_effect(str(text or ""), labels=EFFECT_LABELS)
+                result = self.llm_client.classify_effect(str(text or ""), labels=effect_labels)
                 label = self._normalize_label(getattr(result, "label", "other"))
-                if label not in EFFECT_LABELS:
-                    label = "other"
+                if label not in effect_labels:
+                    label = self._fallback_effect_label(effect_labels)
                 confidence = self._coerce_confidence(getattr(result, "confidence", 0.5))
                 return label, confidence
             except Exception:
                 pass
 
-        return "other", 0.5
+        return self._fallback_effect_label(effect_labels), 0.5
 
     def _canonicalize_row(self, row: dict[str, Any]) -> dict[str, Any]:
         """Project one row onto the canonical schema and keep only safe canonical fields."""
@@ -192,6 +201,18 @@ class AnnotationAgent(BaseAgent):
     def _render_spec(self, spec: AnnotationSpec) -> str:
         """Render a stable markdown specification for human annotators."""
 
+        sentiment_labels = spec.labels[:3]
+        effect_labels = spec.labels[3:]
+        sentiment_descriptions = [
+            "low rating or clearly negative review",
+            "mixed or middle rating review",
+            "clearly positive review",
+        ]
+        sentiment_lines = [f"- {label}: {description}" for label, description in zip(sentiment_labels, sentiment_descriptions)]
+        effect_lines = [f"- {label}: review mentions {label.replace('_', ' ')}" for label in effect_labels]
+        example_effects = (effect_labels + [self._fallback_effect_label(effect_labels)])[:3]
+        example_sentiments = ["positive", "neutral", "negative"]
+
         lines = [
             f"# Annotation Spec: {spec.name}",
             "",
@@ -204,24 +225,18 @@ class AnnotationAgent(BaseAgent):
             "",
             "## Classes and definitions",
             "### Sentiment",
-            "- negative: low rating or clearly negative review",
-            "- neutral: mixed or middle rating review",
-            "- positive: clearly positive review",
+            *sentiment_lines,
             "",
             "### Effect",
-            "- energy: review mentions improved energy or vitality",
-            "- side_effects: review mentions adverse reactions",
-            "- other: no clear effect mentioned",
+            *effect_lines,
             "",
             "## Examples",
-            "- id=1, text=Great product, rating=5 -> positive / energy",
-            "- id=2, text=Average result, rating=3 -> neutral / other",
-            "- id=3, text=Made me feel worse, rating=1 -> negative / side_effects",
+            *[f"- id={index + 1}, text=Example {index + 1}, rating={5 - index * 2} -> {sentiment} / {effect}" for index, (sentiment, effect) in enumerate(zip(example_sentiments, example_effects))],
             "",
             "## Edge cases",
             "- Missing rating -> sentiment_label is None",
-            "- Empty text -> effect_label falls back to other",
-            "- Invalid or out-of-vocabulary effect label -> other",
+            "- Empty text -> effect_label falls back to the configured default label",
+            "- Invalid or out-of-vocabulary effect label -> configured default label",
         ]
 
         return "\n".join(lines)
@@ -246,6 +261,20 @@ class AnnotationAgent(BaseAgent):
         if numeric > 1.0:
             return 1.0
         return numeric
+
+    def _effect_label_vocabulary(self) -> list[str]:
+        """Resolve the active effect-label vocabulary from config with a safe fitness fallback."""
+
+        annotation = getattr(getattr(self.ctx, "config", None), "annotation", None)
+        effect_labels = list(getattr(annotation, "effect_labels", []) or []) if annotation is not None else []
+        return [str(label).strip() for label in effect_labels if str(label).strip()] or list(EFFECT_LABELS)
+
+    def _fallback_effect_label(self, effect_labels: list[str]) -> str:
+        """Choose the safest fallback effect label for offline and error paths."""
+
+        if "other" in effect_labels:
+            return "other"
+        return effect_labels[0] if effect_labels else "other"
 
     def _normalize_label(self, value: Any) -> str:
         """Normalize a label for deterministic comparisons and fallback handling."""

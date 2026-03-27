@@ -49,6 +49,17 @@ def _make_context(tmp_path: Path) -> PipelineContext:
     return PipelineContext.from_config(config)
 
 
+def _make_context_with_effect_labels(tmp_path: Path, effect_labels: list[str]) -> PipelineContext:
+    """Build a minimal pipeline context with a custom effect-label vocabulary."""
+
+    config = AppConfig(
+        project=ProjectConfig(name="minecraft-demo", root_dir=tmp_path),
+        source=SourceConfig(use_huggingface=True),
+        annotation=AnnotationConfig(effect_labels=effect_labels),
+    )
+    return PipelineContext.from_config(config)
+
+
 @pytest.mark.parametrize(
     "rating, expected",
     [(1, "negative"), (3, "neutral"), (5, "positive")],
@@ -89,3 +100,19 @@ def test_generate_spec_contains_required_sections(tmp_path: Path) -> None:
     assert "text" in spec
     assert "label" in spec
     assert "id" in spec
+
+
+def test_generate_spec_uses_configured_effect_labels(tmp_path: Path) -> None:
+    """The annotation spec should reflect the configured effect-label vocabulary."""
+
+    effect_labels = ["crafting", "combat", "enchantments"]
+    agent = AnnotationAgent(_make_context_with_effect_labels(tmp_path, effect_labels), registry=FakeRegistry())
+
+    spec = agent.generate_spec(
+        _Frame([{"id": "1", "text": "Crafting instructions", "label": None, "rating": None, "source": "Web", "created_at": "now", "split": None, "meta_json": "{}"}]),
+        task="minecraft instructions annotation",
+    )
+
+    for label in effect_labels:
+        assert label in spec
+    assert "configured default label" in spec

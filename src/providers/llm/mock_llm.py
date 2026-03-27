@@ -29,26 +29,42 @@ class MockLLM(BaseLLM):
             raise ValueError("labels must not be empty")
 
         text_lower = text.lower()
-        if "side effect" in text_lower:
-            label = self._choose_label("side_effects", labels)
-            confidence = 0.9
-        elif "energy" in text_lower:
-            label = self._choose_label("energy", labels)
-            confidence = 0.9
+        normalized_labels = {self._normalize(label) for label in labels}
+
+        if {"crafting", "combat", "enchantments"} & normalized_labels:
+            keyword_routes = [
+                (("enchant", "enchantment", "enchanted", "energy", "survival"), "enchantments"),
+                (("combat", "fight", "battle", "arena", "potion", "warning"), "combat"),
+                (("craft", "crafting", "redstone", "build"), "crafting"),
+            ]
         else:
-            label = self._choose_label("other", labels)
-            confidence = 0.55
+            keyword_routes = [
+                (("side effect", "side effects"), "side_effects"),
+                (("energy",), "energy"),
+            ]
 
-        return LabelResult(label=label, confidence=confidence)
+        for keywords, predicted_label in keyword_routes:
+            if any(keyword in text_lower for keyword in keywords):
+                return LabelResult(label=self._resolve_label(predicted_label, labels), confidence=0.9)
 
-    def _choose_label(self, predicted: str, labels: list[str]) -> str:
+        return LabelResult(label=self._fallback_label(labels), confidence=0.55)
+
+    def _resolve_label(self, predicted: str, labels: list[str]) -> str:
         """Map the predicted label to the provided label vocabulary when possible."""
 
         normalized_prediction = self._normalize(predicted)
         for label in labels:
             if self._normalize(label) == normalized_prediction:
                 return label
-        return predicted
+        return self._fallback_label(labels)
+
+    def _fallback_label(self, labels: list[str]) -> str:
+        """Pick the safest fallback label for deterministic offline demo behavior."""
+
+        for label in labels:
+            if self._normalize(label) == "other":
+                return label
+        return labels[0]
 
     def _normalize(self, label: str) -> str:
         """Normalize label text so space and hyphen variants compare consistently."""

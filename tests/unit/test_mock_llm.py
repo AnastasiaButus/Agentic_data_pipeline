@@ -39,6 +39,26 @@ def test_mock_llm_returns_label_result_and_bounds_confidence() -> None:
     assert result.confidence == 0.9
 
 
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Crafting instructions for a new build", "crafting"),
+        ("Combat tips for the arena", "combat"),
+        ("Enchantments help long-term progression", "enchantments"),
+        ("Nothing specific here", "other"),
+    ],
+)
+def test_mock_llm_classifies_minecraft_labels(text: str, expected: str) -> None:
+    """The classifier should respect minecraft-oriented label vocabularies."""
+
+    llm = MockLLM()
+
+    result = llm.classify_effect(text, labels=["crafting", "combat", "enchantments", "other"])
+
+    assert result.label == expected
+    assert result.confidence in {0.55, 0.9}
+
+
 def test_mock_llm_empty_labels_raise_value_error() -> None:
     """An empty label vocabulary should fail fast."""
 

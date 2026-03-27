@@ -42,6 +42,8 @@ def test_run_pipeline_smoke_uses_only_approved_sources_when_approval_file_exists
 
     import pandas as pd
 
+    from src.domain import SourceCandidate
+    from src.services import source_discovery_service as discovery_module
     from src.agents import data_collection_agent as data_collection_module
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -55,9 +57,34 @@ def test_run_pipeline_smoke_uses_only_approved_sources_when_approval_file_exists
     )
 
     (tmp_path / "data" / "raw").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "data" / "raw" / "approved_sources.json").write_text('["missing-source-id"]', encoding="utf-8")
+    approved_source_id = "hf_fitness_supplements_reviews"
+    (tmp_path / "data" / "raw" / "approved_sources.json").write_text(f'["{approved_source_id}"]', encoding="utf-8")
 
     captured_sources: dict[str, list[object]] = {}
+    captured_report: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        discovery_module.SourceDiscoveryService,
+        "run",
+        lambda self: [
+            SourceCandidate(
+                approved_source_id,
+                "hf_dataset",
+                "Approved HF",
+                approved_source_id,
+                score=1.0,
+                metadata={"web_url": f"https://huggingface.co/datasets/{approved_source_id}"},
+            ),
+            SourceCandidate(
+                "hf-unapproved",
+                "hf_dataset",
+                "Unapproved HF",
+                "hf-unapproved",
+                score=0.5,
+                metadata={"web_url": "https://huggingface.co/datasets/hf-unapproved"},
+            ),
+        ],
+    )
 
     def fake_collect(self, sources):
         captured_sources["sources"] = list(sources)
@@ -109,10 +136,21 @@ def test_run_pipeline_smoke_uses_only_approved_sources_when_approval_file_exists
         ),
     )
 
+    from src.services import reporting_service as reporting_module
+
+    original_write_final_report = reporting_module.ReportingService.write_final_report
+
+    def capture_final_report(self, summary):
+        captured_report["summary"] = summary
+        return original_write_final_report(self, summary)
+
+    monkeypatch.setattr(reporting_module.ReportingService, "write_final_report", capture_final_report)
+
     from run_pipeline import main
 
     exit_code = main(["--config", str(config_path)])
 
     assert exit_code == 0
-    assert captured_sources["sources"] == []
+    assert [source.source_id for source in captured_sources["sources"]] == [approved_source_id]
+    assert captured_report["summary"]["approval"]["approval_status"] == "applied"
     assert (tmp_path / "final_report.md").exists()

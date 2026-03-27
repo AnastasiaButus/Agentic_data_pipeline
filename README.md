@@ -78,7 +78,7 @@ This is a discovery-side approval checkpoint only. It is not a UI, not a product
 
 The orchestration layer now applies the approval helper between discovery and collection. In practice, the pipeline discovers sources, filters them through `approved_sources.json` when present, and then passes the approved subset to collection.
 
-This remains a file-based MVP, not a full approval subsystem, and it is intentionally narrow so the offline demo baseline stays intact.
+The approval-aware path now exposes simple file-based status semantics such as missing-file, applied, and empty-subset cases. This remains a file-based MVP, not a full approval subsystem, and it is intentionally narrow so the offline demo baseline stays intact.
 
 ## Artifacts Produced
 

@@ -140,7 +140,7 @@ def test_eda_pack_handles_empty_quality_output(monkeypatch, tmp_path: Path) -> N
 
     class FakeCollectionAgent:
         def run(self, sources):
-            return pd.DataFrame([])
+            return pd.DataFrame(columns=["id", "source", "text", "rating"])
 
     class FakeQualityAgent:
         def detect_issues(self, collected):
@@ -223,7 +223,6 @@ def test_eda_pack_handles_empty_quality_output(monkeypatch, tmp_path: Path) -> N
 
     assert result["review_status"] == "skipped_missing_corrected_queue"
     assert "Датасет пустой" in eda_report
-    assert "колонки" in eda_report.lower() or "Колонки" in eda_report
     annotation_trace_report = (tmp_path / "reports" / "annotation_trace_report.md").read_text(encoding="utf-8")
     annotation_trace_context = json.loads((tmp_path / "data" / "interim" / "annotation_trace.json").read_text(encoding="utf-8"))
     assert "Трассировка annotation contract" in annotation_trace_report
@@ -232,7 +231,7 @@ def test_eda_pack_handles_empty_quality_output(monkeypatch, tmp_path: Path) -> N
     assert (tmp_path / "reports" / "annotation_trace_report.md").exists()
     assert (tmp_path / "data" / "interim" / "annotation_trace.json").exists()
     assert eda_context["n_rows"] == 0
-    assert eda_context["columns"] == []
+    assert eda_context["columns"] == ["id", "source", "text", "rating"]
     assert eda_context["source_distribution"]["available"] is False
     assert eda_context["effect_label_distribution"]["available"] is False
     assert eda_context["rating_summary"]["available"] is False

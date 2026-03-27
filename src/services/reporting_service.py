@@ -551,6 +551,8 @@ class ReportingService:
 
         rows = self._to_records(df_like)
         columns = self._collect_columns(rows)
+        if not columns:
+            columns = self._collect_input_columns(df_like)
         notes: list[str] = []
 
         if not rows:
@@ -585,6 +587,20 @@ class ReportingService:
                 normalized_key = self._normalize_text(key)
                 if normalized_key and normalized_key not in columns:
                     columns.append(normalized_key)
+        return columns
+
+    def _collect_input_columns(self, df_like: Any) -> list[str]:
+        """Collect column names from dataframe-like inputs when row materialization is empty."""
+
+        raw_columns = getattr(df_like, "columns", None)
+        if raw_columns is None:
+            return []
+
+        columns: list[str] = []
+        for column_name in list(raw_columns):
+            normalized_column = self._normalize_text(column_name)
+            if normalized_column and normalized_column not in columns:
+                columns.append(normalized_column)
         return columns
 
     def _build_distribution_summary(self, rows: list[dict[str, Any]], column_name: str) -> dict[str, Any]:

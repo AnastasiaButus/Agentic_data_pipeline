@@ -106,3 +106,4 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert Path(captured_report["summary"]["annotation"]["annotation_trace_context_path"]).as_posix() == "data/interim/annotation_trace.json"
     assert Path(captured_report["summary"]["eda"]["eda_report_path"]).as_posix() == "reports/eda_report.md"
     assert Path(captured_report["summary"]["eda"]["eda_context_path"]).as_posix() == "data/interim/eda_context.json"
+    

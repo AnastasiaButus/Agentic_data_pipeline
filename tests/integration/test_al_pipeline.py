@@ -7,12 +7,20 @@ from pathlib import Path
 from src.agents.active_learning_agent import ActiveLearningAgent
 from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, SourceConfig
 from src.core.context import PipelineContext
+from src.services.reporting_service import ReportingService
 
 
 class FakeRegistry:
     """Capture artifact writes without touching the filesystem."""
 
+    def __init__(self) -> None:
+        self.markdown_writes: dict[str, str] = {}
+
     def save_dataframe(self, path: str | Path, df: object) -> Path:
+        return Path(path)
+
+    def save_markdown(self, path: str | Path, content: str) -> Path:
+        self.markdown_writes[str(path)] = content
         return Path(path)
 
 
@@ -55,12 +63,17 @@ def _synthetic_records() -> list[dict[str, object]]:
 def test_al_pipeline_runs_multiple_iterations_with_entropy_and_random(tmp_path: Path) -> None:
     """The offline AL pipeline should run multiple iterations and support entropy/random comparison."""
 
-    entropy_agent = ActiveLearningAgent(_make_context(tmp_path), registry=FakeRegistry(), random_state=7)
-    random_agent = ActiveLearningAgent(_make_context(tmp_path), registry=FakeRegistry(), random_state=7)
+    registry = FakeRegistry()
+    context = _make_context(tmp_path)
+    entropy_agent = ActiveLearningAgent(context, registry=registry, random_state=7)
+    random_agent = ActiveLearningAgent(context, registry=registry, random_state=7)
+    reporting = ReportingService(context, registry=registry)
     records = _synthetic_records()
 
     entropy_history, entropy_labeled = entropy_agent.run_cycle(records, strategy="entropy", seed_size=50, n_iterations=5, batch_size=20)
     random_history, random_labeled = random_agent.run_cycle(records, strategy="random", seed_size=50, n_iterations=5, batch_size=20)
+    comparison_rows = entropy_agent.compare_strategies(records, strategies=("entropy", "random"), seed_size=50, n_iterations=2, batch_size=20)
+    comparison_report = reporting.write_al_comparison_report(comparison_rows)
 
     assert len(entropy_history) >= 2
     assert len(random_history) >= 2
@@ -68,3 +81,12 @@ def test_al_pipeline_runs_multiple_iterations_with_entropy_and_random(tmp_path: 
     assert all({"iteration", "n_labeled", "accuracy", "f1"}.issubset(row.keys()) for row in random_history)
     assert len(entropy_labeled) >= 50
     assert len(random_labeled) >= 50
+    assert comparison_rows
+    assert {"entropy", "random"}.issubset({row["strategy"] for row in comparison_rows})
+    assert comparison_report == "reports/al_comparison_report.md"
+    markdown = registry.markdown_writes[comparison_report]
+    assert "strategy" in markdown
+    assert "iteration" in markdown
+    assert "n_labeled" in markdown
+    assert "accuracy" in markdown
+    assert "f1" in markdown

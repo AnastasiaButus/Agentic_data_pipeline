@@ -17,6 +17,9 @@ class FakeRegistry:
     def save_dataframe(self, path: str | Path, df: object) -> Path:
         return Path(path)
 
+    def save_markdown(self, path: str | Path, content: str) -> Path:
+        return Path(path)
+
 
 def _make_context(tmp_path: Path) -> PipelineContext:
     """Build a minimal pipeline context for the active learning tests."""
@@ -103,3 +106,16 @@ def test_run_cycle_returns_history_with_expected_metrics(tmp_path: Path) -> None
     assert len(history) >= 2
     assert {"iteration", "n_labeled", "accuracy", "f1"}.issubset(history[0].keys())
     assert len(labeled_df) >= 50
+
+
+def test_compare_strategies_returns_entropy_and_random_rows(tmp_path: Path) -> None:
+    """Strategy comparison should flatten per-iteration rows for entropy and random."""
+
+    agent = ActiveLearningAgent(_make_context(tmp_path), registry=FakeRegistry(), random_state=13)
+
+    rows = agent.compare_strategies(_synthetic_records(), strategies=("entropy", "random"), seed_size=50, n_iterations=2, batch_size=20)
+
+    assert rows
+    assert {"entropy", "random"}.issubset({row["strategy"] for row in rows})
+    for row in rows:
+        assert {"strategy", "iteration", "n_labeled", "accuracy", "f1"}.issubset(row.keys())

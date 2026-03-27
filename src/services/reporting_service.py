@@ -81,6 +81,30 @@ class ReportingService:
         self.registry.save_markdown(path, "\n".join(lines))
         return path
 
+    def write_al_comparison_report(self, rows: list[dict[str, Any]]) -> str:
+        """Write a compact markdown summary for AL strategy comparison rows.
+
+        The report stays table-based so it remains offline-safe and easy to inspect in plain text.
+        """
+
+        lines = ["# Active Learning Comparison Report", ""]
+        lines.append("| strategy | iteration | n_labeled | accuracy | f1 |")
+        lines.append("| --- | ---: | ---: | ---: | ---: |")
+        for row in rows:
+            lines.append(
+                "| {strategy} | {iteration} | {n_labeled} | {accuracy:.3f} | {f1:.3f} |".format(
+                    strategy=row.get("strategy", ""),
+                    iteration=row.get("iteration", ""),
+                    n_labeled=row.get("n_labeled", ""),
+                    accuracy=self._coerce_float(row.get("accuracy")),
+                    f1=self._coerce_float(row.get("f1")),
+                )
+            )
+
+        path = "reports/al_comparison_report.md"
+        self.registry.save_markdown(path, "\n".join(lines))
+        return path
+
     def write_final_report(self, summary: dict[str, Any]) -> str:
         """Write the final end-to-end markdown report for the demo pipeline."""
 

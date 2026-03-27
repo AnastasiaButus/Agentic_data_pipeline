@@ -276,6 +276,42 @@ class ActiveLearningAgent(BaseAgent):
 
         return history, labeled_df
 
+    def compare_strategies(
+        self,
+        df: Any,
+        strategies: tuple[str, ...] = ("entropy", "random"),
+        seed_size: int = 50,
+        n_iterations: int = 5,
+        batch_size: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Run the offline AL loop for multiple strategies and return flat comparison rows.
+
+        The method keeps the existing ``run_cycle`` behavior intact by delegating to it once per
+        strategy and flattening the per-iteration histories into a single table-friendly list.
+        """
+
+        comparison_rows: list[dict[str, Any]] = []
+        for strategy in strategies:
+            history, _ = self.run_cycle(
+                df,
+                strategy=strategy,
+                seed_size=seed_size,
+                n_iterations=n_iterations,
+                batch_size=batch_size,
+            )
+            for row in history:
+                comparison_rows.append(
+                    {
+                        "strategy": strategy,
+                        "iteration": row.get("iteration"),
+                        "n_labeled": row.get("n_labeled"),
+                        "accuracy": row.get("accuracy"),
+                        "f1": row.get("f1"),
+                    }
+                )
+
+        return comparison_rows
+
     def _filter_labeled_records(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Keep only rows with usable text and effect labels for the AL baseline."""
 

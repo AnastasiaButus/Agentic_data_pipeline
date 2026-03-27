@@ -85,3 +85,28 @@ def test_hf_loader_limit_zero_uses_safe_columns_without_materialization() -> Non
 
     assert frame.empty
     assert list(frame.columns) == ["id", "text", "label"]
+
+
+def test_hf_loader_preserves_canonical_dataset_id() -> None:
+    """Canonical dataset ids should remain unchanged during normalization."""
+
+    loader = HFDatasetLoader()
+
+    assert loader._normalize_dataset_name("owner/name") == "owner/name"
+
+
+def test_hf_loader_normalizes_standard_dataset_url() -> None:
+    """A standard Hugging Face dataset URL should normalize to the canonical dataset id."""
+
+    loader = HFDatasetLoader()
+
+    assert loader._normalize_dataset_name("https://huggingface.co/datasets/owner/name") == "owner/name"
+
+
+def test_hf_loader_normalizes_tree_and_viewer_urls() -> None:
+    """Tree and viewer dataset URLs should also normalize to the canonical dataset id."""
+
+    loader = HFDatasetLoader()
+
+    assert loader._normalize_dataset_name("https://huggingface.co/datasets/owner/name/tree/main") == "owner/name"
+    assert loader._normalize_dataset_name("https://huggingface.co/datasets/owner/name/viewer/default/train") == "owner/name"

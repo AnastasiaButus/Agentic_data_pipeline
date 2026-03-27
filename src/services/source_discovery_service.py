@@ -86,9 +86,9 @@ class SourceDiscoveryService:
                     source_id=dataset_id,
                     source_type="hf_dataset",
                     title=title,
-                    uri=f"https://huggingface.co/datasets/{dataset_id}",
+                    uri=dataset_id,
                     score=score,
-                    metadata=metadata,
+                    metadata={**metadata, "web_url": f"https://huggingface.co/datasets/{dataset_id}"},
                 )
             )
 

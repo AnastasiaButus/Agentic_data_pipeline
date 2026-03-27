@@ -56,6 +56,8 @@ These demo paths are designed to work offline and do not require network access.
 
 For non-demo configs, source discovery can now query the public Hugging Face datasets search API using the request topic. This is a narrow discovery and shortlisting step only.
 
+For real Hugging Face candidates, discovery stores the canonical dataset id in `uri` and keeps the dataset page URL in metadata when relevant.
+
 If the online lookup fails, the service falls back safely instead of breaking the pipeline. The offline demo path remains unchanged and still uses the local deterministic payloads.
 
 ## Hugging Face Collection MVP

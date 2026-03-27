@@ -328,11 +328,40 @@ def test_non_demo_config_uses_real_huggingface_path(monkeypatch, tmp_path: Path)
     assert candidate.source_type == "hf_dataset"
     assert candidate.source_id == "fitness/supplements-reviews"
     assert candidate.title == "Fitness Supplements Reviews"
-    assert candidate.uri == "https://huggingface.co/datasets/fitness/supplements-reviews"
+    assert candidate.uri == "fitness/supplements-reviews"
     assert candidate.metadata["source_kind"] == "hf_search"
+    assert candidate.metadata["web_url"] == "https://huggingface.co/datasets/fitness/supplements-reviews"
     assert candidate.metadata["downloads"] == 1234
     assert candidate.metadata["likes"] == 56
     assert candidate.metadata["tags"] == ["text-classification", "reviews"]
+
+
+def test_real_huggingface_candidate_uses_canonical_dataset_id_uri(monkeypatch, tmp_path: Path) -> None:
+    """Real HF discovery should store canonical dataset ids in uri and the page URL in metadata."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
+    service = SourceDiscoveryService(context)
+
+    payload = {
+        "datasets": [
+            {
+                "id": "owner/name",
+                "title": "Owner Name Dataset",
+                "downloads": 10,
+                "likes": 1,
+                "tags": ["text-classification"],
+            }
+        ]
+    }
+    monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: payload)
+
+    candidate = service.search_huggingface()[0]
+
+    assert candidate.source_id == "owner/name"
+    assert candidate.uri == "owner/name"
+    assert candidate.metadata["web_url"] == "https://huggingface.co/datasets/owner/name"
 
 
 def test_real_huggingface_path_failure_falls_back_safely(monkeypatch, tmp_path: Path) -> None:

@@ -136,7 +136,7 @@ class HFDatasetLoader:
         if parsed.scheme in {"http", "https"} and parsed.netloc.endswith("huggingface.co"):
             path_parts = [part for part in parsed.path.split("/") if part]
             if len(path_parts) >= 2 and path_parts[0] == "datasets":
-                return "/".join(path_parts[1:])
+                return "/".join(path_parts[1:3])
 
         return candidate
 

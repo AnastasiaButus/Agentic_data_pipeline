@@ -18,16 +18,57 @@ class ReportingService:
         self.registry = registry if registry is not None else ArtifactRegistry(ctx)
 
     def write_source_report(self, sources: list[Any]) -> str:
-        """Write a compact source discovery report."""
+        """Write a compact Russian shortlist report for manual approval review."""
 
-        lines = ["# Source Report", "", f"- discovered_sources: {len(sources)}"]
-        for candidate in sources:
-            title = getattr(candidate, "title", "")
-            source_type = getattr(candidate, "source_type", "")
-            uri = getattr(candidate, "uri", "")
-            lines.append(f"- {title} [{source_type}] -> {uri}")
+        approval_candidates = [self._candidate_to_approval_record(candidate) for candidate in sources]
+        self.registry.save_json("data/raw/approval_candidates.json", approval_candidates)
+
+        lines = [
+            "# Короткий shortlist источников",
+            "",
+            "Это список найденных источников для ручного просмотра и одобрения перед следующим шагом pipeline.",
+            "",
+        ]
+
+        if not sources:
+            lines.extend([
+                "Кандидаты не найдены.",
+                "",
+                "Чтобы одобрить источники, добавьте их `source_id` в `data/raw/approved_sources.json`.",
+                "Формат файла: JSON list of strings.",
+            ])
+            path = "reports/source_report.md"
+            self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
+            return path
+
+        lines.extend([
+            "Чтобы одобрить источники, добавьте их `source_id` в `data/raw/approved_sources.json`.",
+            "Формат файла: JSON list of strings.",
+            "",
+        ])
+
+        for index, candidate in enumerate(sources, start=1):
+            title = self._normalize_text(getattr(candidate, "title", ""))
+            source_id = self._normalize_text(getattr(candidate, "source_id", ""))
+            source_type = self._normalize_text(getattr(candidate, "source_type", ""))
+            uri = self._normalize_text(getattr(candidate, "uri", ""))
+            score = self._format_numeric(getattr(candidate, "score", 0.0))
+            metadata = getattr(candidate, "metadata", None)
+
+            lines.append(f"## Источник {index}")
+            lines.append(f"- source_id: {source_id}")
+            lines.append(f"- source_type: {source_type}")
+            lines.append(f"- title: {title}")
+            lines.append(f"- uri: {uri}")
+            lines.append(f"- score: {score}")
+
+            metadata_text = self._format_compact_metadata(metadata)
+            if metadata_text:
+                lines.append(f"- metadata: {metadata_text}")
+            lines.append("")
+
         path = "reports/source_report.md"
-        self.registry.save_markdown(path, "\n".join(lines))
+        self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
         return path
 
     def write_quality_report(self, quality_report: Any) -> str:
@@ -109,7 +150,7 @@ class ReportingService:
         """Write the final end-to-end markdown report for the demo pipeline."""
 
         lines = ["# Final Report", ""]
-        for section_name in ["sources", "quality", "annotation", "review", "active_learning", "training", "artifacts"]:
+        for section_name in ["sources", "quality", "annotation", "review", "approval", "active_learning", "training", "artifacts"]:
             section = summary.get(section_name)
             lines.append(f"## {section_name.replace('_', ' ').title()}")
             lines.append("")
@@ -165,3 +206,63 @@ class ReportingService:
         if numeric != numeric:
             return 0.0
         return max(0.0, min(1.0, numeric))
+
+    def _format_numeric(self, value: Any) -> str:
+        """Format numeric discovery values without confidence-style clamping."""
+
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return self._normalize_text(value)
+
+        if numeric != numeric:
+            return "nan"
+
+        if numeric.is_integer():
+            return str(int(numeric))
+
+        return f"{numeric:.3f}".rstrip("0").rstrip(".")
+
+    def _format_compact_metadata(self, metadata: Any) -> str:
+        """Render a short metadata summary that stays readable in markdown reports."""
+
+        if not isinstance(metadata, dict) or not metadata:
+            return ""
+
+        preferred_keys = ["web_url", "downloads", "likes", "tags", "stars", "language"]
+        parts: list[str] = []
+        seen_keys: set[str] = set()
+
+        for key in preferred_keys:
+            if key in metadata:
+                parts.append(f"{key}={metadata[key]}")
+                seen_keys.add(key)
+
+        for key, value in metadata.items():
+            if key in seen_keys:
+                continue
+            if len(parts) >= 8:
+                break
+            parts.append(f"{key}={value}")
+
+        return ", ".join(parts)
+
+    def _candidate_to_approval_record(self, candidate: Any) -> dict[str, Any]:
+        """Convert a shortlist candidate into a stable helper artifact row.
+
+        The helper artifact is intentionally simple so a human can inspect the markdown report
+        while an approval workflow can read the JSON shortlist without extra parsing logic.
+        """
+
+        metadata = getattr(candidate, "metadata", None)
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        return {
+            "source_id": self._normalize_text(getattr(candidate, "source_id", "")),
+            "source_type": self._normalize_text(getattr(candidate, "source_type", "")),
+            "title": self._normalize_text(getattr(candidate, "title", "")),
+            "uri": self._normalize_text(getattr(candidate, "uri", "")),
+            "score": getattr(candidate, "score", 0.0),
+            "metadata": dict(metadata),
+        }

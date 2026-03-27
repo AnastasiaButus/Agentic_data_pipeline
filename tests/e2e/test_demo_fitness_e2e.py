@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from src.core.config import load_config
@@ -47,6 +48,18 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
 
     assert exit_code == 0
     assert (tmp_path / "final_report.md").exists()
+    final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
+    assert "## Approval" in final_report
+    assert "approval_status: skipped_missing_file" in final_report
+    approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
+    assert isinstance(approval_candidates, list)
+    assert len(approval_candidates) == 1
+    assert approval_candidates[0]["source_id"] == "demo_fitness_scrape"
+    assert approval_candidates[0]["title"] == "Fitness Supplements Offline Demo"
+    source_report = (tmp_path / "reports" / "source_report.md").read_text(encoding="utf-8")
+    assert "Короткий shortlist источников" in source_report
+    assert "ручного просмотра и одобрения" in source_report
+    assert "Fitness Supplements Offline Demo" in source_report
     assert (tmp_path / "data" / "interim" / "model_metrics.json").exists()
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert "Fitness Supplements Offline Demo" in (tmp_path / "data" / "raw" / "discovered_sources.json").read_text(encoding="utf-8")

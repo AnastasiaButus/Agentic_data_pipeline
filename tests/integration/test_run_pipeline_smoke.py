@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from src.core.config import load_config
@@ -32,6 +33,19 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
 
     assert exit_code == 0
     assert (tmp_path / "final_report.md").exists()
+    final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
+    assert "## Approval" in final_report
+    assert "approval_status: skipped_missing_file" in final_report
+    approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
+    assert isinstance(approval_candidates, list)
+    assert len(approval_candidates) == 1
+    assert approval_candidates[0]["source_id"] == "demo_fitness_scrape"
+    assert approval_candidates[0]["title"] == "Fitness Supplements Offline Demo"
+    source_report = (tmp_path / "reports" / "source_report.md").read_text(encoding="utf-8")
+    assert "Короткий shortlist источников" in source_report
+    assert "ручного просмотра и одобрения" in source_report
+    assert "Fitness Supplements Offline Demo" in source_report
+    assert "score:" in source_report
     assert (tmp_path / "data" / "interim" / "model_metrics.json").exists()
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert "Fitness Supplements Offline Demo" in (tmp_path / "data" / "raw" / "discovered_sources.json").read_text(encoding="utf-8")
@@ -72,7 +86,7 @@ def test_run_pipeline_smoke_uses_only_approved_sources_when_approval_file_exists
                 "hf_dataset",
                 "Approved HF",
                 approved_source_id,
-                score=1.0,
+                score=17.5,
                 metadata={"web_url": f"https://huggingface.co/datasets/{approved_source_id}"},
             ),
             SourceCandidate(
@@ -154,3 +168,15 @@ def test_run_pipeline_smoke_uses_only_approved_sources_when_approval_file_exists
     assert [source.source_id for source in captured_sources["sources"]] == [approved_source_id]
     assert captured_report["summary"]["approval"]["approval_status"] == "applied"
     assert (tmp_path / "final_report.md").exists()
+    final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
+    assert "## Approval" in final_report
+    assert "approval_status: applied" in final_report
+    approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
+    assert isinstance(approval_candidates, list)
+    assert [row["source_id"] for row in approval_candidates] == [approved_source_id, "hf-unapproved"]
+    assert approval_candidates[0]["score"] == 17.5
+    source_report = (tmp_path / "reports" / "source_report.md").read_text(encoding="utf-8")
+    assert "Короткий shortlist источников" in source_report
+    assert "ручного просмотра и одобрения" in source_report
+    assert approved_source_id in source_report
+    assert "score: 17.5" in source_report

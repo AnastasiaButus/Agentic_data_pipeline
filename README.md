@@ -34,6 +34,10 @@ Human-in-the-loop review happens after annotation. Low-confidence rows are expor
 
 Label Studio export is supported for annotated batches.
 
+The source shortlist report is now written in Russian and is meant for human review before approval. It lists discovered candidates in a compact, readable format and also saves a machine-readable `data/raw/approval_candidates.json` helper artifact for review tooling.
+
+`data/raw/approved_sources.json` remains the separate human-edited approval input.
+
 ## Repository Structure
 
 - `src/` - pipeline implementation, agents, services, providers, and ML helpers
@@ -102,6 +106,8 @@ A successful demo run produces artifacts such as:
 - The online capability currently starts with Hugging Face datasets discovery and does not cover the full collection pipeline.
 - The online capability now includes Hugging Face discovery, GitHub repository discovery MVP, and a minimal Hugging Face collection MVP, but it is still not a full production-ready online pipeline.
 - The approval gate MVP is file-based and intentionally minimal; it only filters shortlist candidates by approved `source_id` values.
+- The source shortlist report is a Russian MVP for human review, not a full approval UI.
+- The `approval_candidates.json` artifact is a helper shortlist for review automation, not an approval decision file.
 - The demo datasets are intentionally small and synthetic/local.
 - The offline demo path is meant for reproducible coursework-style runs, not for production use.
 - Some stages are intentionally deterministic to keep the baseline stable for local execution.

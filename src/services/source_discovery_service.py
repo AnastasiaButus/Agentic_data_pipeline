@@ -16,6 +16,11 @@ from src.core.runtime import (
 )
 from src.domain import SourceCandidate
 from src.services.artifact_registry import ArtifactRegistry
+from src.services.source_compliance import (
+    build_candidate_compliance_metadata,
+    extract_github_license,
+    extract_huggingface_license,
+)
 
 
 class SourceDiscoveryService:
@@ -78,6 +83,15 @@ class SourceDiscoveryService:
                 metadata["likes"] = likes
             if tags:
                 metadata["tags"] = tags
+            web_url = f"https://huggingface.co/datasets/{dataset_id}"
+            metadata.update(
+                build_candidate_compliance_metadata(
+                    "hf_dataset",
+                    web_url,
+                    metadata=metadata,
+                    license_label=extract_huggingface_license(item),
+                )
+            )
 
             candidates.append(
                 SourceCandidate(
@@ -86,7 +100,7 @@ class SourceDiscoveryService:
                     title=title,
                     uri=dataset_id,
                     score=score,
-                    metadata={**metadata, "web_url": f"https://huggingface.co/datasets/{dataset_id}"},
+                    metadata={**metadata, "web_url": web_url},
                 )
             )
 
@@ -108,7 +122,12 @@ class SourceDiscoveryService:
                 title="Internal Reviews API",
                 uri="https://example.internal/api/reviews",
                 score=0.93,
-                metadata={"api_kind": "internal"},
+                metadata=build_candidate_compliance_metadata(
+                    "api",
+                    "https://example.internal/api/reviews",
+                    metadata={"api_kind": "internal"},
+                )
+                | {"api_kind": "internal"},
             )
         ]
 
@@ -128,7 +147,12 @@ class SourceDiscoveryService:
                 title="Public Reviews API",
                 uri="https://example.com/api/reviews",
                 score=0.9,
-                metadata={"api_kind": "public"},
+                metadata=build_candidate_compliance_metadata(
+                    "api",
+                    "https://example.com/api/reviews",
+                    metadata={"api_kind": "public"},
+                )
+                | {"api_kind": "public"},
             )
         ]
 
@@ -183,6 +207,14 @@ class SourceDiscoveryService:
                 metadata["description"] = description
             if topics:
                 metadata["topics"] = topics[:5]
+            metadata.update(
+                build_candidate_compliance_metadata(
+                    "github_repo",
+                    uri,
+                    metadata=metadata,
+                    license_label=extract_github_license(item),
+                )
+            )
 
             candidates.append(
                 SourceCandidate(
@@ -213,7 +245,12 @@ class SourceDiscoveryService:
                 title="Fitness Supplements Review Page",
                 uri="https://example.com/reviews",
                 score=0.2,
-                metadata={"source_kind": "web_stub"},
+                metadata=build_candidate_compliance_metadata(
+                    "scrape",
+                    "https://example.com/reviews",
+                    metadata={"source_kind": "web_stub"},
+                )
+                | {"source_kind": "web_stub"},
             )
         ]
 
@@ -318,7 +355,12 @@ class SourceDiscoveryService:
                     title="Fitness Supplements Offline Demo",
                     uri="demo://fitness-supplements",
                     score=1.0,
-                    metadata={"html": self._fitness_demo_html(), "demo_mode": True, "topic": self.ctx.config.request.topic},
+                    metadata=build_candidate_compliance_metadata(
+                        "scrape",
+                        "demo://fitness-supplements",
+                        metadata={"html": self._fitness_demo_html(), "demo_mode": True, "topic": self.ctx.config.request.topic},
+                    )
+                    | {"html": self._fitness_demo_html(), "demo_mode": True, "topic": self.ctx.config.request.topic},
                 )
             ]
 
@@ -330,7 +372,12 @@ class SourceDiscoveryService:
                     title="Minecraft Instructions Offline Demo",
                     uri="demo://minecraft-instructions",
                     score=1.0,
-                    metadata={"html": self._minecraft_demo_html(), "demo_mode": True, "topic": self.ctx.config.request.topic},
+                    metadata=build_candidate_compliance_metadata(
+                        "scrape",
+                        "demo://minecraft-instructions",
+                        metadata={"html": self._minecraft_demo_html(), "demo_mode": True, "topic": self.ctx.config.request.topic},
+                    )
+                    | {"html": self._minecraft_demo_html(), "demo_mode": True, "topic": self.ctx.config.request.topic},
                 )
             ]
 

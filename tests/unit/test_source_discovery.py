@@ -127,13 +127,14 @@ def test_search_github_repos_transforms_response_to_candidates(monkeypatch, tmp_
     assert candidates[0].title == "octocat/fitness-reviews"
     assert candidates[0].uri == "https://github.com/octocat/fitness-reviews"
     assert candidates[0].score == 17.0
-    assert candidates[0].metadata == {
-        "source_kind": "github_search",
-        "stars": 17,
-        "language": "Python",
-        "description": "Repository for review tooling",
-        "topics": ["reviews", "fitness", "pipeline"],
-    }
+    assert candidates[0].metadata["source_kind"] == "github_search"
+    assert candidates[0].metadata["stars"] == 17
+    assert candidates[0].metadata["language"] == "Python"
+    assert candidates[0].metadata["description"] == "Repository for review tooling"
+    assert candidates[0].metadata["topics"] == ["reviews", "fitness", "pipeline"]
+    assert candidates[0].metadata["license"] == "unknown"
+    assert candidates[0].metadata["license_status"] == "unknown"
+    assert candidates[0].metadata["robots_txt_status"] == "not_applicable_api"
     assert captured["topic"] == "fitness supplements"
 
 
@@ -259,6 +260,9 @@ def test_internal_api_candidates_use_api_source_type(tmp_path: Path) -> None:
 
     assert candidates[0].source_type == "api"
     assert candidates[0].metadata["api_kind"] == "internal"
+    assert candidates[0].metadata["license"] == "internal_or_restricted"
+    assert candidates[0].metadata["license_status"] == "internal_review_required"
+    assert candidates[0].metadata["robots_txt_status"] == "not_applicable_api"
 
 
 def test_non_demo_stub_methods_return_empty_lists(tmp_path: Path) -> None:
@@ -367,6 +371,9 @@ def test_demo_config_keeps_offline_demo_path(tmp_path: Path) -> None:
 
     assert discovered[0].source_type == "scrape"
     assert discovered[0].uri == "demo://fitness-supplements"
+    assert discovered[0].metadata["license"] == "offline_demo_fixture"
+    assert discovered[0].metadata["license_status"] == "demo_fixture"
+    assert discovered[0].metadata["robots_txt_status"] == "not_applicable_local_demo"
 
 
 def test_non_demo_config_uses_real_huggingface_path(monkeypatch, tmp_path: Path) -> None:
@@ -403,6 +410,9 @@ def test_non_demo_config_uses_real_huggingface_path(monkeypatch, tmp_path: Path)
     assert candidate.metadata["downloads"] == 1234
     assert candidate.metadata["likes"] == 56
     assert candidate.metadata["tags"] == ["text-classification", "reviews"]
+    assert candidate.metadata["license"] == "unknown"
+    assert candidate.metadata["license_status"] == "unknown"
+    assert candidate.metadata["robots_txt_status"] == "not_applicable_api"
 
 
 def test_non_demo_shortlist_can_include_hf_and_github_real_candidates(monkeypatch, tmp_path: Path) -> None:
@@ -474,6 +484,34 @@ def test_real_huggingface_candidate_uses_canonical_dataset_id_uri(monkeypatch, t
     assert candidate.source_id == "owner/name"
     assert candidate.uri == "owner/name"
     assert candidate.metadata["web_url"] == "https://huggingface.co/datasets/owner/name"
+
+
+def test_huggingface_candidate_surfaces_declared_license_when_available(monkeypatch, tmp_path: Path) -> None:
+    """HF discovery should surface dataset license metadata into approval-facing fields."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
+    service = SourceDiscoveryService(context)
+
+    payload = {
+        "datasets": [
+            {
+                "id": "owner/name",
+                "title": "Owner Name Dataset",
+                "downloads": 10,
+                "likes": 1,
+                "tags": ["text-classification", "license:mit"],
+            }
+        ]
+    }
+    monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: payload)
+
+    candidate = service.search_huggingface()[0]
+
+    assert candidate.metadata["license"] == "mit"
+    assert candidate.metadata["license_status"] == "declared"
+    assert candidate.metadata["robots_txt_status"] == "not_applicable_api"
 
 
 def test_real_huggingface_path_failure_falls_back_safely(monkeypatch, tmp_path: Path) -> None:

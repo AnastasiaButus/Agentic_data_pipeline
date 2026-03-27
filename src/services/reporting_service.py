@@ -8,6 +8,7 @@ from typing import Any
 
 from src.core.context import PipelineContext
 from src.services.artifact_registry import ArtifactRegistry
+from src.services.source_compliance import COMPLIANCE_KEYS, build_candidate_compliance_metadata
 
 
 class ReportingService:
@@ -56,6 +57,7 @@ class ReportingService:
             uri = self._normalize_text(getattr(candidate, "uri", ""))
             score = self._format_numeric(getattr(candidate, "score", 0.0))
             metadata = getattr(candidate, "metadata", None)
+            compliance = self._source_compliance_payload(candidate, metadata)
 
             lines.append(f"## Источник {index}")
             lines.append(f"- source_id: {source_id}")
@@ -63,6 +65,13 @@ class ReportingService:
             lines.append(f"- title: {title}")
             lines.append(f"- uri: {uri}")
             lines.append(f"- score: {score}")
+            lines.append(f"- license: {compliance['license']}")
+            lines.append(f"- license_status: {compliance['license_status']}")
+            lines.append(f"- robots_txt_status: {compliance['robots_txt_status']}")
+            if compliance.get("robots_txt_url"):
+                lines.append(f"- robots_txt_url: {compliance['robots_txt_url']}")
+            if compliance.get("approval_notes"):
+                lines.append(f"- approval_notes: {compliance['approval_notes']}")
 
             metadata_text = self._format_compact_metadata(metadata)
             if metadata_text:
@@ -1331,23 +1340,32 @@ class ReportingService:
         if not isinstance(metadata, dict) or not metadata:
             return ""
 
-        preferred_keys = ["web_url", "downloads", "likes", "tags", "stars", "language"]
+        excluded_keys = set(COMPLIANCE_KEYS) | {"html"}
+        preferred_keys = ["source_kind", "api_kind", "demo_mode", "topic", "web_url", "downloads", "likes", "tags", "stars", "language"]
         parts: list[str] = []
         seen_keys: set[str] = set()
 
         for key in preferred_keys:
-            if key in metadata:
+            if key in metadata and key not in excluded_keys:
                 parts.append(f"{key}={metadata[key]}")
                 seen_keys.add(key)
 
         for key, value in metadata.items():
-            if key in seen_keys:
+            if key in seen_keys or key in excluded_keys:
                 continue
             if len(parts) >= 8:
                 break
             parts.append(f"{key}={value}")
 
         return ", ".join(parts)
+
+    def _source_compliance_payload(self, candidate: Any, metadata: Any) -> dict[str, str]:
+        """Return the approval-facing compliance payload for a shortlist candidate."""
+
+        normalized_metadata = metadata if isinstance(metadata, dict) else {}
+        source_type = self._normalize_text(getattr(candidate, "source_type", ""))
+        uri = self._normalize_text(getattr(candidate, "uri", ""))
+        return build_candidate_compliance_metadata(source_type, uri, metadata=normalized_metadata)
 
     def _build_eda_summary(self, df_like: Any) -> dict[str, Any]:
         """Summarize the post-quality dataframe-like input without inventing values."""
@@ -1876,6 +1894,7 @@ class ReportingService:
         metadata = getattr(candidate, "metadata", None)
         if not isinstance(metadata, dict):
             metadata = {}
+        compliance = self._source_compliance_payload(candidate, metadata)
 
         return {
             "source_id": self._normalize_text(getattr(candidate, "source_id", "")),
@@ -1883,5 +1902,10 @@ class ReportingService:
             "title": self._normalize_text(getattr(candidate, "title", "")),
             "uri": self._normalize_text(getattr(candidate, "uri", "")),
             "score": getattr(candidate, "score", 0.0),
+            "license": compliance["license"],
+            "license_status": compliance["license_status"],
+            "robots_txt_status": compliance["robots_txt_status"],
+            "robots_txt_url": compliance["robots_txt_url"],
+            "approval_notes": compliance["approval_notes"],
             "metadata": dict(metadata),
         }

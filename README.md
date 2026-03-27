@@ -384,6 +384,13 @@ python run_pipeline.py --config configs/your_gemini_config.yaml
 
 Таким образом в проекте уже есть видимый approval checkpoint между discovery и collection.
 
+Для ручного approval теперь дополнительно используются:
+
+- `data/raw/approval_candidates.json` — shortlist в JSON с `license`, `license_status`, `robots_txt_status`, `robots_txt_url`, `approval_notes`;
+- `reports/source_report.md` — человекочитаемый markdown shortlist с теми же governance-полями для просмотра перед approve.
+
+Это позволяет не смешивать discovery с автоматическим "юридическим движком", но делает license/robots проверку видимой частью HITL approval flow.
+
 ---
 
 ## Сильные стороны текущего baseline
@@ -407,7 +414,7 @@ python run_pipeline.py --config configs/your_gemini_config.yaml
 
 - text-first фокус;
 - online ingestion слой пока MVP;
-- governance/compliance слой ещё будет усиливаться отдельно;
+- governance/compliance уже покрывает базовые `license` и `robots.txt` сигналы в approval artifacts, но ещё не является полным policy engine;
 - scraping не является production-ready браузерным пайплайном;
 - мультимодальность пока не главный трек.
 

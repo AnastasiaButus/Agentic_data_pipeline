@@ -7,6 +7,7 @@ from pathlib import Path
 
 from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, RequestConfig, SourceConfig
 from src.core.context import PipelineContext
+from src.domain import SourceCandidate
 from src.services.reporting_service import ReportingService
 
 
@@ -97,6 +98,44 @@ def test_eda_html_report_is_created(tmp_path: Path) -> None:
     assert "EDA Report" in html
     assert "Raw vs cleaned" in html
     assert "Charts" in html
+
+
+def test_source_report_and_approval_candidates_include_compliance_fields(tmp_path: Path) -> None:
+    """Approval-facing source artifacts should surface license and robots metadata explicitly."""
+
+    service = ReportingService(_make_context(tmp_path))
+    source = SourceCandidate(
+        "demo_fitness_scrape",
+        "scrape",
+        "Fitness Supplements Offline Demo",
+        "demo://fitness-supplements",
+        score=1.0,
+        metadata={"html": "<html></html>", "demo_mode": True, "topic": "fitness supplements"},
+    )
+
+    report_path = service.write_source_report([source])
+    report = (tmp_path / report_path).read_text(encoding="utf-8")
+    approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
+
+    assert approval_candidates == [
+        {
+            "source_id": "demo_fitness_scrape",
+            "source_type": "scrape",
+            "title": "Fitness Supplements Offline Demo",
+            "uri": "demo://fitness-supplements",
+            "score": 1.0,
+            "license": "offline_demo_fixture",
+            "license_status": "demo_fixture",
+            "robots_txt_status": "not_applicable_local_demo",
+            "robots_txt_url": "",
+            "approval_notes": "offline demo fixture, no external site access",
+            "metadata": {"html": "<html></html>", "demo_mode": True, "topic": "fitness supplements"},
+        }
+    ]
+    assert "license: offline_demo_fixture" in report
+    assert "robots_txt_status: not_applicable_local_demo" in report
+    assert "approval_notes: offline demo fixture, no external site access" in report
+    assert "html=" not in report
 
 
 def test_review_queue_report_and_context_make_hitl_steps_explicit(tmp_path: Path) -> None:

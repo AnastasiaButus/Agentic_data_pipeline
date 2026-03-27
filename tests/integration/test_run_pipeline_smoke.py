@@ -65,6 +65,9 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert len(approval_candidates) == 1
     assert approval_candidates[0]["source_id"] == "demo_fitness_scrape"
     assert approval_candidates[0]["title"] == "Fitness Supplements Offline Demo"
+    assert approval_candidates[0]["license"] == "offline_demo_fixture"
+    assert approval_candidates[0]["license_status"] == "demo_fixture"
+    assert approval_candidates[0]["robots_txt_status"] == "not_applicable_local_demo"
     review_queue_report = (tmp_path / "reports" / "review_queue_report.md").read_text(encoding="utf-8")
     assert "# Очередь ручной проверки" in review_queue_report
     assert "ручной проверки после авторазметки" in review_queue_report
@@ -113,6 +116,8 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert "ручного просмотра и одобрения" in source_report
     assert "Fitness Supplements Offline Demo" in source_report
     assert "score:" in source_report
+    assert "license: offline_demo_fixture" in source_report
+    assert "robots_txt_status: not_applicable_local_demo" in source_report
     dashboard_html = (tmp_path / "reports" / "run_dashboard.html").read_text(encoding="utf-8")
     assert "Pipeline Operator Dashboard" in dashboard_html
     assert "effective_mode: offline_demo" in dashboard_html
@@ -710,6 +715,8 @@ def test_run_pipeline_smoke_uses_only_approved_sources_when_approval_file_exists
     assert isinstance(approval_candidates, list)
     assert [row["source_id"] for row in approval_candidates] == [approved_source_id, "hf-unapproved"]
     assert approval_candidates[0]["score"] == 17.5
+    assert approval_candidates[0]["license"] == "unknown"
+    assert approval_candidates[0]["robots_txt_status"] == "not_applicable_api"
     review_queue_report = (tmp_path / "reports" / "review_queue_report.md").read_text(encoding="utf-8")
     assert "# Очередь ручной проверки" in review_queue_report
     assert "ручной проверки после авторазметки" in review_queue_report
@@ -722,6 +729,7 @@ def test_run_pipeline_smoke_uses_only_approved_sources_when_approval_file_exists
     assert "ручного просмотра и одобрения" in source_report
     assert approved_source_id in source_report
     assert "score: 17.5" in source_report
+    assert "robots_txt_status: not_applicable_api" in source_report
 
 
 def test_run_pipeline_smoke_reports_applied_empty_subset(monkeypatch, tmp_path: Path) -> None:

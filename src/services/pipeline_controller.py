@@ -74,7 +74,11 @@ class PipelineController:
         annotation_report_path = self.reporting_service.write_annotation_report(annotated, annotation_summary)
 
         # Export the reviewer queue before consuming corrected labels so HITL semantics stay consistent.
-        review_queue = self.review_queue_service.export_low_confidence_queue(annotated)
+        review_threshold = self._resolve_review_threshold(annotation_summary)
+        label_options = self._resolve_review_label_options()
+        review_queue = self.review_queue_service.export_low_confidence_queue(annotated, threshold=review_threshold)
+        review_queue_report_path = self.reporting_service.write_review_queue_report(review_queue, review_threshold, label_options)
+        review_queue_context_path = self.reporting_service.write_review_queue_context(review_queue, review_threshold, label_options)
 
         reviewed = annotated
         review_status = "skipped_missing_corrected_queue"
@@ -121,6 +125,8 @@ class PipelineController:
                 "review": {
                     "status": review_status,
                     "review_queue_rows": len(self._to_records(review_queue)),
+                    "review_queue_report_path": review_queue_report_path,
+                    "review_queue_context_path": review_queue_context_path,
                 },
                 "approval": {
                     "approved_sources_path": "data/raw/approved_sources.json",
@@ -149,6 +155,8 @@ class PipelineController:
                 "source_report": source_report_path,
                 "quality_report": quality_report_path,
                 "annotation_report": annotation_report_path,
+                "review_queue_report": review_queue_report_path,
+                "review_queue_context": review_queue_context_path,
                 "al_report": al_report_path,
                 "final_report": final_report_path,
             },
@@ -177,3 +185,45 @@ class PipelineController:
             return [dict(row) for row in df]
 
         return []
+
+    def _review_threshold(self) -> float:
+        """Return the review queue threshold used for export and reporting.
+
+        The demo configs define a confidence threshold, but the review queue export must keep a
+        stable fallback when the configured value is missing or left at the dataclass default.
+        """
+
+        annotation = getattr(self.ctx.config, "annotation", None)
+        configured_threshold = getattr(annotation, "confidence_threshold", None)
+        if configured_threshold in (None, 0, 0.0):
+            return 0.7
+        return float(configured_threshold)
+
+    def _resolve_review_threshold(self, annotation_summary: dict[str, Any] | None) -> float:
+        """Prefer the annotation summary threshold and fall back to the review default.
+
+        This keeps the review pack aligned with the actual annotation pass while preserving the
+        existing fallback when a summary omits the threshold.
+        """
+
+        summary_threshold = annotation_summary.get("confidence_threshold") if annotation_summary else None
+        if summary_threshold is not None:
+            return float(summary_threshold)
+        return self._review_threshold()
+
+    def _resolve_review_label_options(self) -> list[str]:
+        """Resolve the effect-label vocabulary used by the review pack.
+
+        The controller follows the same vocabulary semantics as AnnotationAgent and only falls
+        back to config values or the demo-safe default when the agent helper is unavailable.
+        """
+
+        effect_labels_helper = getattr(self.annotation_agent, "_effect_label_vocabulary", None)
+        if callable(effect_labels_helper):
+            label_options = list(effect_labels_helper())
+        else:
+            annotation = getattr(self.ctx.config, "annotation", None)
+            label_options = list(getattr(annotation, "effect_labels", []) or []) if annotation is not None else []
+
+        cleaned = [str(label).strip() for label in label_options if str(label).strip()]
+        return cleaned or ["energy", "side_effects", "other"]

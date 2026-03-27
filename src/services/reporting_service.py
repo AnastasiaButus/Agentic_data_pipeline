@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from src.core.context import PipelineContext
@@ -145,6 +146,72 @@ class ReportingService:
         path = "reports/al_comparison_report.md"
         self.registry.save_markdown(path, "\n".join(lines))
         return path
+
+    def write_review_queue_report(
+        self,
+        review_queue: Any,
+        confidence_threshold: float,
+        label_options: list[str],
+    ) -> str:
+        """Write a Russian review-pack report for human annotation review."""
+
+        rows = self._to_records(review_queue)
+        input_queue_path = "data/interim/review_queue.csv"
+        corrected_queue_path = "data/interim/review_queue_corrected.csv"
+
+        lines = [
+            "# Очередь ручной проверки",
+            "",
+            "Это очередь примеров для ручной проверки после авторазметки.",
+            "",
+            f"- Входной файл очереди: {input_queue_path}",
+            f"- Порог confidence: {self._format_numeric(confidence_threshold)}",
+            f"- Строк в очереди: {len(rows)}",
+            f"- Исправленный файл положите сюда: {corrected_queue_path}",
+            "- Проверьте поля: id, source, text, label, effect_label, confidence, reviewed_effect_label, review_comment, human_verified",
+            f"- Допустимые effect labels: {', '.join(label_options) if label_options else 'не заданы'}",
+            "",
+        ]
+
+        if not rows:
+            lines.append("Очередь пуста, ручная проверка не требуется.")
+        else:
+            lines.append("## Примеры для проверки")
+            lines.append("")
+            for row in rows:
+                lines.append(
+                    "- id: {id} | source: {source} | effect_label: {effect_label} | confidence: {confidence} | text: {text}".format(
+                        id=self._normalize_text(row.get("id")),
+                        source=self._normalize_text(row.get("source")),
+                        effect_label=self._normalize_text(row.get("effect_label")),
+                        confidence=self._format_numeric(row.get("confidence")),
+                        text=self._normalize_text(row.get("text")),
+                    )
+                )
+
+        path = Path("reports/review_queue_report.md")
+        self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
+        return str(path)
+
+    def write_review_queue_context(
+        self,
+        review_queue: Any,
+        confidence_threshold: float,
+        label_options: list[str],
+    ) -> str:
+        """Write a machine-readable helper artifact for review tooling."""
+
+        rows = self._to_records(review_queue)
+        payload = {
+            "confidence_threshold": confidence_threshold,
+            "n_rows": len(rows),
+            "label_options": list(label_options),
+            "input_queue_path": "data/interim/review_queue.csv",
+            "expected_corrected_queue_path": "data/interim/review_queue_corrected.csv",
+        }
+        path = Path("data/interim/review_queue_context.json")
+        self.registry.save_json(path, payload)
+        return str(path)
 
     def write_final_report(self, summary: dict[str, Any]) -> str:
         """Write the final end-to-end markdown report for the demo pipeline."""

@@ -38,6 +38,10 @@ The source shortlist report is now written in Russian and is meant for human rev
 
 `data/raw/approved_sources.json` remains the separate human-edited approval input.
 
+After auto-annotation, the pipeline also writes `data/interim/review_queue.csv` for manual checking, a Russian `reports/review_queue_report.md` for the reviewer, and a machine-readable `data/interim/review_queue_context.json` helper artifact for tooling or lightweight review UI support.
+
+The corrected review queue is still edited by a human separately in `data/interim/review_queue_corrected.csv`.
+
 ## Repository Structure
 
 - `src/` - pipeline implementation, agents, services, providers, and ML helpers
@@ -108,6 +112,7 @@ A successful demo run produces artifacts such as:
 - The approval gate MVP is file-based and intentionally minimal; it only filters shortlist candidates by approved `source_id` values.
 - The source shortlist report is a Russian MVP for human review, not a full approval UI.
 - The `approval_candidates.json` artifact is a helper shortlist for review automation, not an approval decision file.
+- `review_queue.csv` is the manual review queue, `review_queue_report.md` is the Russian reviewer guide, and `review_queue_context.json` is a helper artifact for tooling.
 - The demo datasets are intentionally small and synthetic/local.
 - The offline demo path is meant for reproducible coursework-style runs, not for production use.
 - Some stages are intentionally deterministic to keep the baseline stable for local execution.

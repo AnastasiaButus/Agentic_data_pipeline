@@ -56,10 +56,18 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert len(approval_candidates) == 1
     assert approval_candidates[0]["source_id"] == "demo_fitness_scrape"
     assert approval_candidates[0]["title"] == "Fitness Supplements Offline Demo"
+    review_queue_report = (tmp_path / "reports" / "review_queue_report.md").read_text(encoding="utf-8")
+    assert "# Очередь ручной проверки" in review_queue_report
+    assert "ручной проверки после авторазметки" in review_queue_report
+    review_queue_context = json.loads((tmp_path / "data" / "interim" / "review_queue_context.json").read_text(encoding="utf-8"))
+    assert review_queue_context["confidence_threshold"] == loaded_config.annotation.confidence_threshold
+    assert review_queue_context["n_rows"] >= 0
+    assert review_queue_context["label_options"] == loaded_config.annotation.effect_labels
     source_report = (tmp_path / "reports" / "source_report.md").read_text(encoding="utf-8")
     assert "Короткий shortlist источников" in source_report
     assert "ручного просмотра и одобрения" in source_report
     assert "Fitness Supplements Offline Demo" in source_report
+    assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert (tmp_path / "data" / "interim" / "model_metrics.json").exists()
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert "Fitness Supplements Offline Demo" in (tmp_path / "data" / "raw" / "discovered_sources.json").read_text(encoding="utf-8")

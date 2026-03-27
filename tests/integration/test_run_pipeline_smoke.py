@@ -41,11 +41,19 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert len(approval_candidates) == 1
     assert approval_candidates[0]["source_id"] == "demo_fitness_scrape"
     assert approval_candidates[0]["title"] == "Fitness Supplements Offline Demo"
+    review_queue_report = (tmp_path / "reports" / "review_queue_report.md").read_text(encoding="utf-8")
+    assert "# Очередь ручной проверки" in review_queue_report
+    assert "ручной проверки после авторазметки" in review_queue_report
+    review_queue_context = json.loads((tmp_path / "data" / "interim" / "review_queue_context.json").read_text(encoding="utf-8"))
+    assert review_queue_context["confidence_threshold"] == loaded_config.annotation.confidence_threshold
+    assert review_queue_context["n_rows"] >= 0
+    assert review_queue_context["label_options"] == loaded_config.annotation.effect_labels
     source_report = (tmp_path / "reports" / "source_report.md").read_text(encoding="utf-8")
     assert "Короткий shortlist источников" in source_report
     assert "ручного просмотра и одобрения" in source_report
     assert "Fitness Supplements Offline Demo" in source_report
     assert "score:" in source_report
+    assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert (tmp_path / "data" / "interim" / "model_metrics.json").exists()
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert "Fitness Supplements Offline Demo" in (tmp_path / "data" / "raw" / "discovered_sources.json").read_text(encoding="utf-8")
@@ -69,6 +77,8 @@ def test_run_pipeline_smoke_uses_only_approved_sources_when_approval_file_exists
         template_text.replace("root_dir: .", f"root_dir: {tmp_path.as_posix()}"),
         encoding="utf-8",
     )
+
+    loaded_config = load_config(config_path)
 
     (tmp_path / "data" / "raw").mkdir(parents=True, exist_ok=True)
     approved_source_id = "hf_fitness_supplements_reviews"
@@ -175,8 +185,121 @@ def test_run_pipeline_smoke_uses_only_approved_sources_when_approval_file_exists
     assert isinstance(approval_candidates, list)
     assert [row["source_id"] for row in approval_candidates] == [approved_source_id, "hf-unapproved"]
     assert approval_candidates[0]["score"] == 17.5
+    review_queue_report = (tmp_path / "reports" / "review_queue_report.md").read_text(encoding="utf-8")
+    assert "# Очередь ручной проверки" in review_queue_report
+    assert "ручной проверки после авторазметки" in review_queue_report
+    review_queue_context = json.loads((tmp_path / "data" / "interim" / "review_queue_context.json").read_text(encoding="utf-8"))
+    assert review_queue_context["confidence_threshold"] == loaded_config.annotation.confidence_threshold
+    assert review_queue_context["n_rows"] >= 0
+    assert review_queue_context["label_options"] == loaded_config.annotation.effect_labels
     source_report = (tmp_path / "reports" / "source_report.md").read_text(encoding="utf-8")
     assert "Короткий shortlist источников" in source_report
     assert "ручного просмотра и одобрения" in source_report
     assert approved_source_id in source_report
     assert "score: 17.5" in source_report
+
+
+def test_review_pack_aligns_with_annotation_summary_and_vocabulary(monkeypatch, tmp_path: Path) -> None:
+    """Review pack should follow AnnotationAgent summary threshold and vocabulary semantics."""
+
+    import pandas as pd
+
+    from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, RequestConfig, SourceConfig
+    from src.core.context import PipelineContext
+    from src.services.pipeline_controller import PipelineController
+
+    config = AppConfig(
+        project=ProjectConfig(name="review-pack-demo", root_dir=tmp_path),
+        source=SourceConfig(),
+        annotation=AnnotationConfig(confidence_threshold=0.0, effect_labels=[]),
+        request=RequestConfig(topic="fitness supplements"),
+    )
+    context = PipelineContext.from_config(config)
+
+    class FakeRegistry:
+        def exists(self, path):
+            return False
+
+        def save_json(self, path, payload):
+            target = tmp_path / Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            return target
+
+        def save_markdown(self, path, payload):
+            target = tmp_path / Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(payload, encoding="utf-8")
+            return target
+
+    class FakeDiscoveryService:
+        def __init__(self) -> None:
+            self.registry = FakeRegistry()
+
+        def run(self):
+            return []
+
+        def load_approved_candidates(self, sources):
+            return list(sources)
+
+    class FakeCollectionAgent:
+        def run(self, sources):
+            return pd.DataFrame([{"id": "1", "text": "Great product", "rating": 5, "effect_label": "energy", "confidence": 1.0}])
+
+    class FakeQualityAgent:
+        def detect_issues(self, collected):
+            return {"warnings": []}
+
+        def run(self, collected):
+            return collected
+
+    class FakeAnnotationAgent:
+        def auto_label(self, df):
+            return [{"id": "1", "text": "Great product", "rating": 5, "effect_label": "energy", "confidence": 0.4}]
+
+        def check_quality(self, annotated):
+            return {"confidence_threshold": 0.6, "n_low_confidence": 1, "n_rows": 1}
+
+        def _effect_label_vocabulary(self):
+            return ["energy", "side_effects", "other"]
+
+    class FakeReviewQueueService:
+        def export_low_confidence_queue(self, df, threshold=0.7):
+            records = [row for row in df if row["confidence"] < threshold]
+            target = tmp_path / "data" / "interim" / "review_queue.csv"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("id\n1\n" if records else "id\n", encoding="utf-8")
+            return records
+
+        def load_corrected_queue(self):
+            raise FileNotFoundError
+
+        def merge_reviewed_labels(self, original_df, corrected_df):
+            return original_df
+
+    class FakeActiveLearningAgent:
+        def run_cycle(self, reviewed, strategy, seed_size, n_iterations, batch_size):
+            return [], reviewed
+
+    class FakeTrainingService:
+        def train(self, df):
+            return ({"model_path": str(tmp_path / "model.pkl")}, {"accuracy": 1.0, "f1": 1.0})
+
+    controller = PipelineController(
+        context,
+        discovery_service=FakeDiscoveryService(),
+        collection_agent=FakeCollectionAgent(),
+        quality_agent=FakeQualityAgent(),
+        annotation_agent=FakeAnnotationAgent(),
+        review_queue_service=FakeReviewQueueService(),
+        active_learning_agent=FakeActiveLearningAgent(),
+        training_service=FakeTrainingService(),
+    )
+
+    result = controller.run()
+
+    review_queue_context = json.loads((tmp_path / "data" / "interim" / "review_queue_context.json").read_text(encoding="utf-8"))
+    assert review_queue_context["confidence_threshold"] == 0.6
+    assert review_queue_context["label_options"] == ["energy", "side_effects", "other"]
+    assert review_queue_context["n_rows"] == 1
+    assert result["approval_status"] == "skipped_missing_file"

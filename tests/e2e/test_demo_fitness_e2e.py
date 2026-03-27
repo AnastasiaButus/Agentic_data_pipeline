@@ -51,6 +51,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
     assert "## Approval" in final_report
     assert "approval_status: skipped_missing_file" in final_report
+    assert "review_merge_report_path" in final_report
     approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
     assert isinstance(approval_candidates, list)
     assert len(approval_candidates) == 1
@@ -63,6 +64,13 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert review_queue_context["confidence_threshold"] == loaded_config.annotation.confidence_threshold
     assert review_queue_context["n_rows"] >= 0
     assert review_queue_context["label_options"] == loaded_config.annotation.effect_labels
+    merge_report = (tmp_path / "reports" / "review_merge_report.md").read_text(encoding="utf-8")
+    assert "Merge не выполнен" in merge_report
+    assert "corrected queue отсутствует" in merge_report
+    merge_context = json.loads((tmp_path / "data" / "interim" / "review_merge_context.json").read_text(encoding="utf-8"))
+    assert merge_context["corrected_queue_found"] is False
+    assert merge_context["n_corrected_rows"] == 0
+    assert merge_context["n_effect_label_changes"] == 0
     source_report = (tmp_path / "reports" / "source_report.md").read_text(encoding="utf-8")
     assert "Короткий shortlist источников" in source_report
     assert "ручного просмотра и одобрения" in source_report

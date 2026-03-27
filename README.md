@@ -42,6 +42,8 @@ After auto-annotation, the pipeline also writes `data/interim/review_queue.csv` 
 
 The corrected review queue is still edited by a human separately in `data/interim/review_queue_corrected.csv`.
 
+If a corrected queue is present, the pipeline also writes `reports/review_merge_report.md` and `data/interim/review_merge_context.json` so the human merge step is visible and auditable. This is still an MVP, not a UI.
+
 ## Repository Structure
 
 - `src/` - pipeline implementation, agents, services, providers, and ML helpers
@@ -113,6 +115,7 @@ A successful demo run produces artifacts such as:
 - The source shortlist report is a Russian MVP for human review, not a full approval UI.
 - The `approval_candidates.json` artifact is a helper shortlist for review automation, not an approval decision file.
 - `review_queue.csv` is the manual review queue, `review_queue_report.md` is the Russian reviewer guide, and `review_queue_context.json` is a helper artifact for tooling.
+- `review_merge_report.md` and `review_merge_context.json` capture the outcome of manual merge after corrected labels are supplied.
 - The demo datasets are intentionally small and synthetic/local.
 - The offline demo path is meant for reproducible coursework-style runs, not for production use.
 - Some stages are intentionally deterministic to keep the baseline stable for local execution.

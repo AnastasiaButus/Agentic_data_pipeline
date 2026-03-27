@@ -213,6 +213,70 @@ class ReportingService:
         self.registry.save_json(path, payload)
         return str(path)
 
+    def write_review_merge_report(
+        self,
+        corrected_queue_found: bool,
+        corrected_queue_path: str,
+        n_corrected_rows: int,
+        n_rows_with_reviewed_effect_label: int,
+        n_effect_label_changes: int,
+        reviewed_effect_labels: list[str],
+        review_status: str,
+    ) -> str:
+        """Write a Russian markdown report for corrected-queue merge results."""
+
+        lines = [
+            "# Результат ручного merge",
+            "",
+            "Это краткий отчет о том, был ли найден corrected queue и что реально изменилось после ручной правки.",
+            "",
+            f"- corrected_queue_found: {'да' if corrected_queue_found else 'нет'}",
+            f"- corrected_queue_path: {corrected_queue_path}",
+            f"- review_status: {review_status}",
+        ]
+
+        if not corrected_queue_found:
+            lines.extend([
+                "",
+                "Merge не выполнен, потому что corrected queue отсутствует.",
+            ])
+        else:
+            lines.extend([
+                f"- n_corrected_rows: {n_corrected_rows}",
+                f"- n_rows_with_reviewed_effect_label: {n_rows_with_reviewed_effect_label}",
+                f"- n_effect_label_changes: {n_effect_label_changes}",
+                f"- reviewed_effect_labels: {', '.join(reviewed_effect_labels) if reviewed_effect_labels else 'нет'}",
+            ])
+
+        path = Path("reports/review_merge_report.md")
+        self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
+        return str(path)
+
+    def write_review_merge_context(
+        self,
+        corrected_queue_found: bool,
+        corrected_queue_path: str,
+        n_corrected_rows: int,
+        n_rows_with_reviewed_effect_label: int,
+        n_effect_label_changes: int,
+        reviewed_effect_labels: list[str],
+        review_status: str,
+    ) -> str:
+        """Write a machine-readable helper artifact for review merge tooling."""
+
+        payload = {
+            "corrected_queue_found": corrected_queue_found,
+            "corrected_queue_path": corrected_queue_path,
+            "n_corrected_rows": n_corrected_rows,
+            "n_rows_with_reviewed_effect_label": n_rows_with_reviewed_effect_label,
+            "n_effect_label_changes": n_effect_label_changes,
+            "reviewed_effect_labels": list(reviewed_effect_labels),
+            "review_status": review_status,
+        }
+        path = Path("data/interim/review_merge_context.json")
+        self.registry.save_json(path, payload)
+        return str(path)
+
     def write_final_report(self, summary: dict[str, Any]) -> str:
         """Write the final end-to-end markdown report for the demo pipeline."""
 

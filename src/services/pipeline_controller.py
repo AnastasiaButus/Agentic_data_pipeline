@@ -82,6 +82,8 @@ class PipelineController:
 
         reviewed = annotated
         review_status = "skipped_missing_corrected_queue"
+        review_merge_report_path = ""
+        review_merge_context_path = ""
         try:
             corrected_queue = self.review_queue_service.load_corrected_queue()
         except FileNotFoundError:
@@ -90,6 +92,26 @@ class PipelineController:
         if corrected_queue is not None:
             reviewed = self.review_queue_service.merge_reviewed_labels(annotated, corrected_queue)
             review_status = "merged"
+
+        review_merge_summary = self._build_review_merge_summary(annotated, corrected_queue, review_status)
+        review_merge_report_path = self.reporting_service.write_review_merge_report(
+            review_merge_summary["corrected_queue_found"],
+            review_merge_summary["corrected_queue_path"],
+            review_merge_summary["n_corrected_rows"],
+            review_merge_summary["n_rows_with_reviewed_effect_label"],
+            review_merge_summary["n_effect_label_changes"],
+            review_merge_summary["reviewed_effect_labels"],
+            review_merge_summary["review_status"],
+        )
+        review_merge_context_path = self.reporting_service.write_review_merge_context(
+            review_merge_summary["corrected_queue_found"],
+            review_merge_summary["corrected_queue_path"],
+            review_merge_summary["n_corrected_rows"],
+            review_merge_summary["n_rows_with_reviewed_effect_label"],
+            review_merge_summary["n_effect_label_changes"],
+            review_merge_summary["reviewed_effect_labels"],
+            review_merge_summary["review_status"],
+        )
 
         reviewed_rows = self._to_records(reviewed)
         al_seed_size = max(1, min(50, len(reviewed_rows) // 2 if len(reviewed_rows) > 1 else 1))
@@ -127,6 +149,8 @@ class PipelineController:
                     "review_queue_rows": len(self._to_records(review_queue)),
                     "review_queue_report_path": review_queue_report_path,
                     "review_queue_context_path": review_queue_context_path,
+                    "review_merge_report_path": review_merge_report_path,
+                    "review_merge_context_path": review_merge_context_path,
                 },
                 "approval": {
                     "approved_sources_path": "data/raw/approved_sources.json",
@@ -157,6 +181,8 @@ class PipelineController:
                 "annotation_report": annotation_report_path,
                 "review_queue_report": review_queue_report_path,
                 "review_queue_context": review_queue_context_path,
+                "review_merge_report": review_merge_report_path,
+                "review_merge_context": review_merge_context_path,
                 "al_report": al_report_path,
                 "final_report": final_report_path,
             },
@@ -227,3 +253,75 @@ class PipelineController:
 
         cleaned = [str(label).strip() for label in label_options if str(label).strip()]
         return cleaned or ["energy", "side_effects", "other"]
+
+    def _build_review_merge_summary(
+        self,
+        annotated: Any,
+        corrected_queue: Any,
+        review_status: str,
+    ) -> dict[str, Any]:
+        """Summarize the real merge outcome without changing merge semantics."""
+
+        corrected_rows = self._to_records(corrected_queue) if corrected_queue is not None else []
+        annotated_rows = self._to_records(annotated)
+        annotated_by_id = {
+            row_id: dict(row)
+            for row in annotated_rows
+            if (row_id := self._normalize_merge_id(row.get("id"))) is not None
+        }
+
+        reviewed_effect_labels: list[str] = []
+        n_effect_label_changes = 0
+        n_rows_with_reviewed_effect_label = 0
+        n_valid_corrected_rows = 0
+
+        for row in corrected_rows:
+            row_id = self._normalize_merge_id(row.get("id"))
+            if row_id is None:
+                continue
+
+            n_valid_corrected_rows += 1
+
+            reviewed_effect_label = self._normalize_merge_label(row.get("reviewed_effect_label"))
+            if reviewed_effect_label:
+                n_rows_with_reviewed_effect_label += 1
+                if reviewed_effect_label not in reviewed_effect_labels:
+                    reviewed_effect_labels.append(reviewed_effect_label)
+
+            original_effect_label = self._normalize_merge_label(annotated_by_id.get(row_id, {}).get("effect_label"))
+            if reviewed_effect_label and reviewed_effect_label != original_effect_label:
+                n_effect_label_changes += 1
+
+        corrected_queue_found = corrected_queue is not None
+        corrected_queue_path = "data/interim/review_queue_corrected.csv"
+
+        return {
+            "corrected_queue_found": corrected_queue_found,
+            "corrected_queue_path": corrected_queue_path,
+            "n_corrected_rows": n_valid_corrected_rows,
+            "n_rows_with_reviewed_effect_label": n_rows_with_reviewed_effect_label,
+            "n_effect_label_changes": n_effect_label_changes,
+            "reviewed_effect_labels": reviewed_effect_labels,
+            "review_status": review_status,
+        }
+
+    def _normalize_merge_id(self, value: Any) -> str | None:
+        """Normalize merge ids and drop missing or blank values instead of stringifying them."""
+
+        normalized = self._normalize_text(value)
+        return normalized if normalized else None
+
+    def _normalize_merge_label(self, value: Any) -> str:
+        """Normalize merge labels for stable comparison in the review summary."""
+
+        normalized = self._normalize_text(value)
+        if not normalized:
+            return ""
+        return normalized.lower().replace(" ", "_").replace("-", "_")
+
+    def _normalize_text(self, value: Any) -> str:
+        """Normalize arbitrary values into stable strings for merge and reporting helpers."""
+
+        if value is None:
+            return ""
+        return str(value).strip()

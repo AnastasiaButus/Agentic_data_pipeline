@@ -233,11 +233,150 @@ def test_eda_pack_handles_empty_quality_output(monkeypatch, tmp_path: Path) -> N
     assert eda_context["n_rows"] == 0
     assert eda_context["columns"] == ["id", "source", "text", "rating"]
     assert eda_context["source_distribution"]["available"] is False
+    assert eda_context["source_distribution"]["reason"] == "no_values"
     assert eda_context["effect_label_distribution"]["available"] is False
+    assert eda_context["effect_label_distribution"]["reason"] == "column_absent"
     assert eda_context["rating_summary"]["available"] is False
+    assert eda_context["rating_summary"]["reason"] == "no_numeric_values"
     assert eda_context["text_length_summary"]["available"] is False
+    assert eda_context["text_length_summary"]["reason"] == "no_text_values"
+    assert eda_context["missing_values_summary"]["source"]["available"] is True
+    assert eda_context["missing_values_summary"]["source"]["missing_count"] == 0
+    assert eda_context["missing_values_summary"]["source"]["missing_fraction"] == 0.0
     assert "eda_report_path" in final_report
     assert "eda_context_path" in final_report
+
+
+def test_eda_pack_counts_blank_text_as_missing(monkeypatch, tmp_path: Path) -> None:
+    """Blank, whitespace-only, None and NaN text values should count as missing."""
+
+    import pandas as pd
+
+    from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, RequestConfig, SourceConfig
+    from src.core.context import PipelineContext
+    from src.services.pipeline_controller import PipelineController
+
+    config = AppConfig(
+        project=ProjectConfig(name="eda-text-empty-demo", root_dir=tmp_path),
+        source=SourceConfig(),
+        annotation=AnnotationConfig(confidence_threshold=0.0, effect_labels=[]),
+        request=RequestConfig(topic="fitness supplements"),
+    )
+    context = PipelineContext.from_config(config)
+
+    class FakeRegistry:
+        def exists(self, path):
+            return False
+
+        def save_json(self, path, payload):
+            target = tmp_path / Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            return target
+
+        def save_markdown(self, path, payload):
+            target = tmp_path / Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(payload, encoding="utf-8")
+            return target
+
+    class FakeDiscoveryService:
+        def __init__(self) -> None:
+            self.registry = FakeRegistry()
+
+        def run(self):
+            return []
+
+        def load_approved_candidates(self, sources):
+            return list(sources)
+
+    class FakeCollectionAgent:
+        def run(self, sources):
+            return pd.DataFrame(
+                [
+                    {"id": "1", "source": "demo", "text": "Useful insight", "rating": 5},
+                    {"id": "2", "source": "demo", "text": "", "rating": 3},
+                    {"id": "3", "source": "demo", "text": "   ", "rating": 1},
+                    {"id": "4", "source": "demo", "text": None, "rating": 4},
+                    {"id": "5", "source": "demo", "text": float("nan"), "rating": 2},
+                ]
+            )
+
+    class FakeQualityAgent:
+        def detect_issues(self, collected):
+            return {"warnings": []}
+
+        def run(self, collected):
+            return collected
+
+    class FakeAnnotationAgent:
+        def auto_label(self, df):
+            return df
+
+        def check_quality(self, annotated):
+            return {"confidence_threshold": 0.6, "n_low_confidence": 0, "n_rows": 5}
+
+        def _effect_label_vocabulary(self):
+            return ["energy", "side_effects", "other"]
+
+        def get_annotation_trace(self):
+            return {
+                "prompt_contract": {"language": "ru", "task": "auto_annotation", "input_fields": ["text", "rating"], "output_fields": ["effect_label", "sentiment_label", "confidence"], "sentiment_labels": ["negative", "neutral", "positive"], "effect_labels": ["energy", "side_effects", "other"], "prompt_preview": "Ты разметчик отзывов о пищевых добавках.", "expected_output_example": {"effect_label": "other", "sentiment_label": "positive", "confidence": 0.5}},
+                "parser_contract": {"preferred_format": "json", "accepted_fallbacks": ["key_value", "partial_json", "deterministic_fallback"], "parse_status_counts": {}, "fallback_reason_counts": {}},
+                "llm_mode": "unknown",
+                "n_rows": 5,
+                "n_fallback_rows": 0,
+                "fallback_rows": [],
+            }
+
+    class FakeReviewQueueService:
+        def export_low_confidence_queue(self, df, threshold=0.7):
+            target = tmp_path / "data" / "interim" / "review_queue.csv"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("id\n", encoding="utf-8")
+            return []
+
+        def load_corrected_queue(self):
+            raise FileNotFoundError
+
+        def merge_reviewed_labels(self, original_df, corrected_df):
+            return original_df
+
+    class FakeActiveLearningAgent:
+        def run_cycle(self, reviewed, strategy, seed_size, n_iterations, batch_size):
+            return [], reviewed
+
+    class FakeTrainingService:
+        def train(self, df):
+            return ({"model_path": str(tmp_path / "model.pkl")}, {"accuracy": 1.0, "f1": 1.0})
+
+    controller = PipelineController(
+        context,
+        discovery_service=FakeDiscoveryService(),
+        collection_agent=FakeCollectionAgent(),
+        quality_agent=FakeQualityAgent(),
+        annotation_agent=FakeAnnotationAgent(),
+        review_queue_service=FakeReviewQueueService(),
+        active_learning_agent=FakeActiveLearningAgent(),
+        training_service=FakeTrainingService(),
+    )
+
+    controller.run()
+
+    eda_context = json.loads((tmp_path / "data" / "interim" / "eda_context.json").read_text(encoding="utf-8"))
+    text_summary = eda_context["text_length_summary"]
+    missing_values_summary = eda_context["missing_values_summary"]
+
+    assert eda_context["n_rows"] == 5
+    assert eda_context["columns"] == ["id", "source", "text", "rating"]
+    assert text_summary["available"] is True
+    assert text_summary["valid_count"] == 1
+    assert text_summary["missing_or_invalid_count"] == 4
+    assert text_summary["min_chars"] == 14
+    assert text_summary["max_chars"] == 14
+    assert text_summary["mean_chars"] == 14
+    assert missing_values_summary["text"]["available"] is True
+    assert missing_values_summary["text"]["missing_count"] == 4
 
 
 def test_run_pipeline_smoke_uses_gemini_provider_when_api_key_present(monkeypatch, tmp_path: Path) -> None:
@@ -1015,3 +1154,280 @@ def test_review_merge_summary_ignores_missing_ids(monkeypatch, tmp_path: Path) -
     assert merge_context["n_effect_label_changes"] == 1
     assert merge_context["reviewed_effect_labels"] == ["side_effects"]
     assert result["review_status"] == "merged"
+
+
+def test_review_merge_status_merged_no_changes_when_corrected_queue_has_no_effect_changes(tmp_path: Path) -> None:
+    """Review status should be 'merged_no_changes' when corrected_queue exists but has no effect_label changes."""
+
+    import json
+    import pandas as pd
+
+    from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, RequestConfig, SourceConfig
+    from src.core.context import PipelineContext
+    from src.services.pipeline_controller import PipelineController
+
+    config = AppConfig(
+        project=ProjectConfig(name="review-merge-no-changes-demo", root_dir=tmp_path),
+        source=SourceConfig(),
+        annotation=AnnotationConfig(confidence_threshold=0.0, effect_labels=[]),
+        request=RequestConfig(topic="fitness supplements"),
+    )
+    context = PipelineContext.from_config(config)
+
+    class FakeRegistry:
+        def exists(self, path):
+            return False
+
+        def save_json(self, path, payload):
+            target = tmp_path / Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            return target
+
+        def save_markdown(self, path, payload):
+            target = tmp_path / Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(payload, encoding="utf-8")
+            return target
+
+    class FakeDiscoveryService:
+        def __init__(self) -> None:
+            self.registry = FakeRegistry()
+
+        def run(self):
+            return []
+
+        def load_approved_candidates(self, sources):
+            return list(sources)
+
+    class FakeCollectionAgent:
+        def run(self, sources):
+            return pd.DataFrame(
+                [
+                    {"id": "1", "text": "Great product", "rating": 5, "effect_label": "energy", "confidence": 0.4},
+                    {"id": "2", "text": "Too sweet", "rating": 1, "effect_label": "side_effects", "confidence": 0.4},
+                ]
+            )
+
+    class FakeQualityAgent:
+        def detect_issues(self, collected):
+            return {"warnings": []}
+
+        def run(self, collected):
+            return collected
+
+    class FakeAnnotationAgent:
+        def auto_label(self, df):
+            return [
+                {"id": "1", "text": "Great product", "rating": 5, "effect_label": "energy", "confidence": 0.4},
+                {"id": "2", "text": "Too sweet", "rating": 1, "effect_label": "side_effects", "confidence": 0.4},
+            ]
+
+        def check_quality(self, annotated):
+            return {"confidence_threshold": 0.6, "n_low_confidence": 2, "n_rows": 2}
+
+        def _effect_label_vocabulary(self):
+            return ["energy", "side_effects", "other"]
+
+    class FakeReviewQueueService:
+        def export_low_confidence_queue(self, df, threshold=0.7):
+            target = tmp_path / "data" / "interim" / "review_queue.csv"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("id,reviewed_effect_label\n1,\n2,\n", encoding="utf-8")
+            return [
+                {"id": "1", "effect_label": "energy", "reviewed_effect_label": "", "confidence": 0.4, "text": "Great product", "source": "demo"},
+                {"id": "2", "effect_label": "side_effects", "reviewed_effect_label": "", "confidence": 0.4, "text": "Too sweet", "source": "demo"},
+            ]
+
+        def load_corrected_queue(self):
+            target = tmp_path / "data" / "interim" / "review_queue_corrected.csv"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # Corrected queue exists but has no reviewed_effect_label values
+            target.write_text(
+                "id,reviewed_effect_label,review_comment,human_verified\n1,,,false\n2,,,false\n",
+                encoding="utf-8",
+            )
+            return [
+                {"id": "1", "reviewed_effect_label": "", "review_comment": "", "human_verified": False},
+                {"id": "2", "reviewed_effect_label": "", "review_comment": "", "human_verified": False},
+            ]
+
+        def merge_reviewed_labels(self, original_df, corrected_df):
+            # No actual changes - return same labels as input
+            return [
+                {"id": "1", "effect_label": "energy", "confidence": 0.4},
+                {"id": "2", "effect_label": "side_effects", "confidence": 0.4},
+            ]
+
+    class FakeActiveLearningAgent:
+        def run_cycle(self, reviewed, strategy, seed_size, n_iterations, batch_size):
+            return [], reviewed
+
+    class FakeTrainingService:
+        def train(self, df):
+            return ({"model_path": str(tmp_path / "model.pkl")}, {"accuracy": 1.0, "f1": 1.0})
+
+    controller = PipelineController(
+        context,
+        discovery_service=FakeDiscoveryService(),
+        collection_agent=FakeCollectionAgent(),
+        quality_agent=FakeQualityAgent(),
+        annotation_agent=FakeAnnotationAgent(),
+        review_queue_service=FakeReviewQueueService(),
+        active_learning_agent=FakeActiveLearningAgent(),
+        training_service=FakeTrainingService(),
+    )
+
+    result = controller.run()
+
+    assert result["review_status"] == "merged_no_changes"
+    merge_report = (tmp_path / "reports" / "review_merge_report.md").read_text(encoding="utf-8")
+    assert "# Результат ручного merge" in merge_report
+    assert "review_status: merged_no_changes" in merge_report
+    merge_context = json.loads((tmp_path / "data" / "interim" / "review_merge_context.json").read_text(encoding="utf-8"))
+    assert merge_context["corrected_queue_found"] is True
+    assert merge_context["n_corrected_rows"] == 2
+    assert merge_context["n_rows_with_reviewed_effect_label"] == 0
+    assert merge_context["n_effect_label_changes"] == 0
+    assert merge_context["review_status"] == "merged_no_changes"
+    final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
+    assert "review_merge_report_path" in final_report
+    assert "status: merged_no_changes" in final_report
+
+
+def test_review_merge_status_stays_merged_when_corrected_queue_has_effect_changes(tmp_path: Path) -> None:
+    """Review status should be 'merged' when corrected_queue exists and has effect_label changes."""
+
+    import json
+    import pandas as pd
+
+    from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, RequestConfig, SourceConfig
+    from src.core.context import PipelineContext
+    from src.services.pipeline_controller import PipelineController
+
+    config = AppConfig(
+        project=ProjectConfig(name="review-merge-with-changes-demo", root_dir=tmp_path),
+        source=SourceConfig(),
+        annotation=AnnotationConfig(confidence_threshold=0.0, effect_labels=[]),
+        request=RequestConfig(topic="fitness supplements"),
+    )
+    context = PipelineContext.from_config(config)
+
+    class FakeRegistry:
+        def exists(self, path):
+            return False
+
+        def save_json(self, path, payload):
+            target = tmp_path / Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            return target
+
+        def save_markdown(self, path, payload):
+            target = tmp_path / Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(payload, encoding="utf-8")
+            return target
+
+    class FakeDiscoveryService:
+        def __init__(self) -> None:
+            self.registry = FakeRegistry()
+
+        def run(self):
+            return []
+
+        def load_approved_candidates(self, sources):
+            return list(sources)
+
+    class FakeCollectionAgent:
+        def run(self, sources):
+            return pd.DataFrame(
+                [
+                    {"id": "1", "text": "Great product", "rating": 5, "effect_label": "energy", "confidence": 0.4},
+                    {"id": "2", "text": "Too sweet", "rating": 1, "effect_label": "side_effects", "confidence": 0.4},
+                ]
+            )
+
+    class FakeQualityAgent:
+        def detect_issues(self, collected):
+            return {"warnings": []}
+
+        def run(self, collected):
+            return collected
+
+    class FakeAnnotationAgent:
+        def auto_label(self, df):
+            return [
+                {"id": "1", "text": "Great product", "rating": 5, "effect_label": "energy", "confidence": 0.4},
+                {"id": "2", "text": "Too sweet", "rating": 1, "effect_label": "side_effects", "confidence": 0.4},
+            ]
+
+        def check_quality(self, annotated):
+            return {"confidence_threshold": 0.6, "n_low_confidence": 2, "n_rows": 2}
+
+        def _effect_label_vocabulary(self):
+            return ["energy", "side_effects", "other"]
+
+    class FakeReviewQueueService:
+        def export_low_confidence_queue(self, df, threshold=0.7):
+            target = tmp_path / "data" / "interim" / "review_queue.csv"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("id,reviewed_effect_label\n1,side_effects\n2,\n", encoding="utf-8")
+            return [
+                {"id": "1", "effect_label": "energy", "reviewed_effect_label": "side_effects", "confidence": 0.4, "text": "Great product", "source": "demo"},
+                {"id": "2", "effect_label": "side_effects", "reviewed_effect_label": "", "confidence": 0.4, "text": "Too sweet", "source": "demo"},
+            ]
+
+        def load_corrected_queue(self):
+            target = tmp_path / "data" / "interim" / "review_queue_corrected.csv"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(
+                "id,reviewed_effect_label,review_comment,human_verified\n1,side_effects,,true\n2,,,false\n",
+                encoding="utf-8",
+            )
+            return [
+                {"id": "1", "reviewed_effect_label": "side_effects", "review_comment": "", "human_verified": True},
+                {"id": "2", "reviewed_effect_label": "", "review_comment": "", "human_verified": False},
+            ]
+
+        def merge_reviewed_labels(self, original_df, corrected_df):
+            return [
+                {"id": "1", "effect_label": "side_effects", "confidence": 1.0},
+                {"id": "2", "effect_label": "side_effects", "confidence": 0.4},
+            ]
+
+    class FakeActiveLearningAgent:
+        def run_cycle(self, reviewed, strategy, seed_size, n_iterations, batch_size):
+            return [], reviewed
+
+    class FakeTrainingService:
+        def train(self, df):
+            return ({"model_path": str(tmp_path / "model.pkl")}, {"accuracy": 1.0, "f1": 1.0})
+
+    controller = PipelineController(
+        context,
+        discovery_service=FakeDiscoveryService(),
+        collection_agent=FakeCollectionAgent(),
+        quality_agent=FakeQualityAgent(),
+        annotation_agent=FakeAnnotationAgent(),
+        review_queue_service=FakeReviewQueueService(),
+        active_learning_agent=FakeActiveLearningAgent(),
+        training_service=FakeTrainingService(),
+    )
+
+    result = controller.run()
+
+    assert result["review_status"] == "merged"
+    merge_report = (tmp_path / "reports" / "review_merge_report.md").read_text(encoding="utf-8")
+    assert "# Результат ручного merge" in merge_report
+    assert "review_status: merged" in merge_report
+    assert "n_effect_label_changes: 1" in merge_report
+    merge_context = json.loads((tmp_path / "data" / "interim" / "review_merge_context.json").read_text(encoding="utf-8"))
+    assert merge_context["corrected_queue_found"] is True
+    assert merge_context["n_corrected_rows"] == 2
+    assert merge_context["n_rows_with_reviewed_effect_label"] == 1
+    assert merge_context["n_effect_label_changes"] == 1
+    assert merge_context["review_status"] == "merged"
+    final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
+    assert "review_merge_report_path" in final_report
+    assert "status: merged" in final_report

@@ -117,9 +117,14 @@ class PipelineController:
 
         if corrected_queue is not None:
             reviewed = self.review_queue_service.merge_reviewed_labels(annotated, corrected_queue)
-            review_status = "merged"
 
         review_merge_summary = self._build_review_merge_summary(annotated, corrected_queue, review_status)
+        
+        # Adjust status based on actual effect_label changes
+        if review_merge_summary["corrected_queue_found"]:
+            n_changes = review_merge_summary["n_effect_label_changes"]
+            review_status = "merged" if n_changes > 0 else "merged_no_changes"
+            review_merge_summary["review_status"] = review_status
         review_merge_report_path = self.reporting_service.write_review_merge_report(
             review_merge_summary["corrected_queue_found"],
             review_merge_summary["corrected_queue_path"],

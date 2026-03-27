@@ -553,16 +553,21 @@ class ReportingService:
         columns = self._collect_columns(rows)
         if not columns:
             columns = self._collect_input_columns(df_like)
+        columns_for_summary = columns or self._collect_input_columns(df_like)
         notes: list[str] = []
 
         if not rows:
             notes.append("Датасет пустой, поэтому статистика ограничена структурой входа.")
 
-        source_distribution = self._build_distribution_summary(rows, "source")
-        effect_label_distribution = self._build_distribution_summary(rows, "effect_label")
-        rating_summary = self._build_numeric_summary(rows, "rating")
-        text_length_summary = self._build_text_length_summary(rows, "text")
-        missing_values_summary = self._build_missing_values_summary(rows, ["source", "effect_label", "rating", "text"])
+        source_distribution = self._build_distribution_summary(rows, "source", columns_for_summary)
+        effect_label_distribution = self._build_distribution_summary(rows, "effect_label", columns_for_summary)
+        rating_summary = self._build_numeric_summary(rows, "rating", columns_for_summary)
+        text_length_summary = self._build_text_length_summary(rows, "text", columns_for_summary)
+        missing_values_summary = self._build_missing_values_summary(
+            rows,
+            ["source", "effect_label", "rating", "text"],
+            columns_for_summary,
+        )
 
         if not columns:
             notes.append("Колонки не были переданы в dataframe-like input или не удалось извлечь записи.")
@@ -603,11 +608,20 @@ class ReportingService:
                 columns.append(normalized_column)
         return columns
 
-    def _build_distribution_summary(self, rows: list[dict[str, Any]], column_name: str) -> dict[str, Any]:
+    def _build_distribution_summary(
+        self,
+        rows: list[dict[str, Any]],
+        column_name: str,
+        available_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Count categorical values only when the requested column is present."""
 
-        if not rows or column_name not in self._collect_columns(rows):
+        columns = available_columns if available_columns is not None else self._collect_columns(rows)
+        if column_name not in columns:
             return {"available": False, "reason": "column_absent"}
+
+        if not rows:
+            return {"available": False, "reason": "no_values"}
 
         counts: dict[str, int] = {}
         for row in rows:
@@ -621,11 +635,20 @@ class ReportingService:
 
         return {"available": True, "column": column_name, "counts": counts}
 
-    def _build_numeric_summary(self, rows: list[dict[str, Any]], column_name: str) -> dict[str, Any]:
+    def _build_numeric_summary(
+        self,
+        rows: list[dict[str, Any]],
+        column_name: str,
+        available_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Summarize numeric values without clamping or synthetic defaults."""
 
-        if not rows or column_name not in self._collect_columns(rows):
+        columns = available_columns if available_columns is not None else self._collect_columns(rows)
+        if column_name not in columns:
             return {"available": False, "reason": "column_absent"}
+
+        if not rows:
+            return {"available": False, "reason": "no_numeric_values"}
 
         values: list[float] = []
         for row in rows:
@@ -651,18 +674,30 @@ class ReportingService:
             "mean": sum(values) / len(values),
         }
 
-    def _build_text_length_summary(self, rows: list[dict[str, Any]], column_name: str) -> dict[str, Any]:
+    def _build_text_length_summary(
+        self,
+        rows: list[dict[str, Any]],
+        column_name: str,
+        available_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Summarize text length in characters for the existing text column."""
 
-        if not rows or column_name not in self._collect_columns(rows):
+        columns = available_columns if available_columns is not None else self._collect_columns(rows)
+        if column_name not in columns:
             return {"available": False, "reason": "column_absent"}
+
+        if not rows:
+            return {"available": False, "reason": "no_text_values"}
 
         lengths: list[int] = []
         for row in rows:
             value = row.get(column_name)
-            if value is None:
+            if self._is_missing_value(value):
                 continue
-            lengths.append(len(self._normalize_text(value)))
+
+            normalized_value = self._normalize_text(value)
+
+            lengths.append(len(normalized_value))
 
         if not lengths:
             return {"available": False, "reason": "no_text_values"}
@@ -677,10 +712,15 @@ class ReportingService:
             "mean_chars": sum(lengths) / len(lengths),
         }
 
-    def _build_missing_values_summary(self, rows: list[dict[str, Any]], key_columns: list[str]) -> dict[str, Any]:
+    def _build_missing_values_summary(
+        self,
+        rows: list[dict[str, Any]],
+        key_columns: list[str],
+        available_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Summarize missing values for the columns the report cares about most."""
 
-        columns = self._collect_columns(rows)
+        columns = available_columns if available_columns is not None else self._collect_columns(rows)
         summary: dict[str, Any] = {}
         for column_name in key_columns:
             if column_name not in columns:
@@ -689,7 +729,7 @@ class ReportingService:
 
             missing_count = 0
             for row in rows:
-                if not self._normalize_text(row.get(column_name)):
+                if self._is_missing_value(row.get(column_name)):
                     missing_count += 1
 
             summary[column_name] = {
@@ -700,6 +740,20 @@ class ReportingService:
             }
 
         return summary
+
+    def _is_missing_value(self, value: Any) -> bool:
+        """Detect missing textual values in a dataframe-friendly way."""
+
+        if value is None:
+            return True
+
+        try:
+            if value != value:
+                return True
+        except Exception:
+            return True
+
+        return not self._normalize_text(value)
 
     def _format_count_map(self, counts: dict[str, int]) -> str:
         """Render a short value-count list for markdown reports."""

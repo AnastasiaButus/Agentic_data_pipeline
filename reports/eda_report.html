@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>EDA Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f1ea; color: #1f2933; margin: 0; padding: 32px; }
+    .wrap { max-width: 1200px; margin: 0 auto; }
+    .intro { max-width: 860px; line-height: 1.6; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 24px 0; }
+    .card { background: #fffaf5; border: 1px solid #d9c8b4; border-radius: 16px; padding: 18px; box-shadow: 0 10px 24px rgba(31, 41, 51, 0.06); }
+    .label { font-size: 13px; color: #7a5c3e; text-transform: uppercase; letter-spacing: 0.04em; }
+    .value { font-size: 30px; font-weight: 700; margin-top: 8px; }
+    .section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+    .section { background: white; border-radius: 18px; padding: 20px; border: 1px solid #eadfce; }
+    .section h3 { margin: 0 0 12px 0; }
+    .plot { margin-top: 28px; background: white; border-radius: 18px; padding: 20px; border: 1px solid #eadfce; }
+    ul { margin: 0; padding-left: 20px; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { text-align: left; padding: 6px 0; vertical-align: top; }
+    .muted { color: #6b7280; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>EDA Report</h1>
+    <p class="intro">Offline-friendly HTML-отчёт по данным после quality stage. Он показывает структуру датасета, сравнение raw/cleaned, пропуски, распределения и краткие аналитические выводы.</p>
+    <div class="cards"><div class="card"><div class="label">Rows</div><div class="value">3</div></div><div class="card"><div class="label">Columns</div><div class="value">8</div></div><div class="card"><div class="label">Duplicate rows</div><div class="value">0</div></div><div class="card"><div class="label">Warnings</div><div class="value">1</div></div></div>
+    <div class="section-grid"><section class="section"><h3>Columns</h3>id, source, text, label, rating, created_at, split, meta_json</section><section class="section"><h3>Raw vs cleaned</h3><table><tbody><tr><td>raw_rows</td><td>3</td></tr><tr><td>cleaned_rows</td><td>3</td></tr><tr><td>dropped_rows</td><td>0</td></tr><tr><td>kept_fraction</td><td>1</td></tr></tbody></table></section><section class="section"><h3>Source distribution</h3><table><tbody><tr><td>Minecraft Instructions Offline Demo</td><td>3</td></tr></tbody></table></section><section class="section"><h3>Effect label distribution</h3><p class="muted">колонка отсутствует</p></section><section class="section"><h3>Rating summary</h3><table><tbody><tr><td>valid_count</td><td>3</td></tr><tr><td>missing_or_invalid_count</td><td>0</td></tr><tr><td>min</td><td>2</td></tr><tr><td>max</td><td>5</td></tr><tr><td>mean</td><td>3.667</td></tr></tbody></table></section><section class="section"><h3>Rating distribution</h3><table><tbody><tr><td>5</td><td>1</td></tr><tr><td>2</td><td>1</td></tr><tr><td>4</td><td>1</td></tr></tbody></table></section><section class="section"><h3>Text length summary</h3><table><tbody><tr><td>valid_count</td><td>3</td></tr><tr><td>missing_or_invalid_count</td><td>0</td></tr><tr><td>min_chars</td><td>64</td></tr><tr><td>max_chars</td><td>76</td></tr><tr><td>mean_chars</td><td>69</td></tr></tbody></table></section><section class="section"><h3>Text length buckets</h3><table><tbody><tr><td>0-49</td><td>0</td></tr><tr><td>50-99</td><td>3</td></tr><tr><td>100-199</td><td>0</td></tr><tr><td>200+</td><td>0</td></tr></tbody></table></section><section class="section"><h3>Missing values</h3><table><thead><tr><th>Column</th><th>Missing</th><th>Fraction</th></tr></thead><tbody><tr><td>source</td><td>0</td><td>0</td></tr><tr><td>effect_label</td><td colspan="2">колонка отсутствует</td></tr><tr><td>rating</td><td>0</td><td>0</td></tr><tr><td>text</td><td>0</td><td>0</td></tr></tbody></table></section><section class="section"><h3>Quality notes</h3><ul><li>missing values detected</li></ul></section></div>
+    <div class="plot">
+      <h2>Charts</h2>
+      <p class="muted">Plotly не установлен, поэтому HTML-отчет показывает summary без интерактивных графиков.</p>
+    </div>
+  </div>
+</body>
+</html>

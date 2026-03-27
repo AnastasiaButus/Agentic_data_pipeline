@@ -1,0 +1,99 @@
+{
+  "n_rows": 3,
+  "columns": [
+    "id",
+    "source",
+    "text",
+    "label",
+    "rating",
+    "created_at",
+    "split",
+    "meta_json"
+  ],
+  "source_distribution": {
+    "available": true,
+    "column": "source",
+    "counts": {
+      "Minecraft Instructions Offline Demo": 3
+    }
+  },
+  "effect_label_distribution": {
+    "available": false,
+    "reason": "column_absent"
+  },
+  "rating_summary": {
+    "available": true,
+    "column": "rating",
+    "valid_count": 3,
+    "missing_or_invalid_count": 0,
+    "min": 2.0,
+    "max": 5.0,
+    "mean": 3.6666666666666665
+  },
+  "text_length_summary": {
+    "available": true,
+    "column": "text",
+    "valid_count": 3,
+    "missing_or_invalid_count": 0,
+    "min_chars": 64,
+    "max_chars": 76,
+    "mean_chars": 69.0
+  },
+  "missing_values_summary": {
+    "source": {
+      "available": true,
+      "column": "source",
+      "missing_count": 0,
+      "missing_fraction": 0.0
+    },
+    "effect_label": {
+      "available": false,
+      "reason": "column_absent"
+    },
+    "rating": {
+      "available": true,
+      "column": "rating",
+      "missing_count": 0,
+      "missing_fraction": 0.0
+    },
+    "text": {
+      "available": true,
+      "column": "text",
+      "missing_count": 0,
+      "missing_fraction": 0.0
+    }
+  },
+  "notes": [],
+  "column_count": 8,
+  "duplicate_summary": {
+    "available": true,
+    "duplicate_rows": 0
+  },
+  "raw_vs_cleaned": {
+    "available": true,
+    "raw_rows": 3,
+    "cleaned_rows": 3,
+    "dropped_rows": 0,
+    "kept_fraction": 1.0
+  },
+  "rating_distribution": {
+    "available": true,
+    "counts": {
+      "5": 1,
+      "2": 1,
+      "4": 1
+    }
+  },
+  "text_length_buckets": {
+    "available": true,
+    "counts": {
+      "0-49": 0,
+      "50-99": 3,
+      "100-199": 0,
+      "200+": 0
+    }
+  },
+  "quality_warnings": [
+    "missing values detected"
+  ]
+}

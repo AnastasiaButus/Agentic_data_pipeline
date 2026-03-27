@@ -1,0 +1,9 @@
+{
+  "corrected_queue_found": false,
+  "corrected_queue_path": "data/interim/review_queue_corrected.csv",
+  "n_corrected_rows": 0,
+  "n_rows_with_reviewed_effect_label": 0,
+  "n_effect_label_changes": 0,
+  "reviewed_effect_labels": [],
+  "review_status": "skipped_missing_corrected_queue"
+}

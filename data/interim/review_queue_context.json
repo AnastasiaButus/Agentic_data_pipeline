@@ -1,0 +1,11 @@
+{
+  "confidence_threshold": 0.6,
+  "n_rows": 0,
+  "label_options": [
+    "crafting",
+    "combat",
+    "enchantments"
+  ],
+  "input_queue_path": "data/interim/review_queue.csv",
+  "expected_corrected_queue_path": "data/interim/review_queue_corrected.csv"
+}

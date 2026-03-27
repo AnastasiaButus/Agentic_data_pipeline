@@ -1,4 +1,4 @@
 text,rating,content
-"""Minecraft review: energy tip for long survival builds""",5,"""Helpful building guide"""
-"""Minecraft review: side effect warning from risky potion use""",1,"""Potion side effect note"""
-"""Minecraft review: crafting instructions for redstone tools""",3,"""Crafting instructions summary"""
+"""Minecraft guide: crafting instructions for redstone tools and starter builds""",5,"""Helpful crafting guide"""
+"""Minecraft guide: combat warning about potion timing in arena fights""",2,"""Combat warning note"""
+"""Minecraft guide: enchantments improve armor and tool progression""",4,"""Enchantments overview"""

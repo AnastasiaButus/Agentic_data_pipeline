@@ -208,6 +208,66 @@ class ReportingService:
         self.registry.save_markdown(path, "\n".join(lines))
         return path
 
+    def write_annotation_trace_report(self, annotation_trace: dict[str, Any]) -> str:
+        """Write a Russian trace report for the annotation prompt and parser contract."""
+
+        prompt_contract = annotation_trace.get("prompt_contract", {}) if isinstance(annotation_trace, dict) else {}
+        parser_contract = annotation_trace.get("parser_contract", {}) if isinstance(annotation_trace, dict) else {}
+        fallback_rows = annotation_trace.get("fallback_rows", []) if isinstance(annotation_trace, dict) else []
+
+        lines = [
+            "# Трассировка annotation contract",
+            "",
+            "Это компактный отчет о prompt contract, ожидаемом формате ответа и fallback-парсинге.",
+            "Он нужен, чтобы будущий real LLM можно было подключить без угадывания контракта.",
+            "",
+            f"- llm_mode: {annotation_trace.get('llm_mode', 'unknown') if isinstance(annotation_trace, dict) else 'unknown'}",
+            f"- n_rows: {annotation_trace.get('n_rows', 0) if isinstance(annotation_trace, dict) else 0}",
+            f"- n_fallback_rows: {annotation_trace.get('n_fallback_rows', 0) if isinstance(annotation_trace, dict) else 0}",
+            "",
+            "## Prompt contract",
+            f"- language: {prompt_contract.get('language', 'ru')}",
+            f"- input_fields: {', '.join(prompt_contract.get('input_fields', [])) or 'нет'}",
+            f"- output_fields: {', '.join(prompt_contract.get('output_fields', [])) or 'нет'}",
+            f"- sentiment_labels: {', '.join(prompt_contract.get('sentiment_labels', [])) or 'нет'}",
+            f"- effect_labels: {', '.join(prompt_contract.get('effect_labels', [])) or 'нет'}",
+            "",
+            "## Prompt preview",
+            prompt_contract.get('prompt_preview', ''),
+            "",
+            "## Expected output",
+            f"- example: {prompt_contract.get('expected_output_example', {})}",
+            "",
+            "## Parser contract",
+            f"- preferred_format: {parser_contract.get('preferred_format', 'json')}",
+            f"- accepted_fallbacks: {', '.join(parser_contract.get('accepted_fallbacks', [])) or 'нет'}",
+            f"- parse_status_counts: {parser_contract.get('parse_status_counts', {})}",
+            f"- fallback_reason_counts: {parser_contract.get('fallback_reason_counts', {})}",
+        ]
+
+        if fallback_rows:
+            lines.extend(["", "## Fallback samples"])
+            for row in fallback_rows:
+                lines.append(
+                    "- mode: {mode} | status: {status} | reasons: {reasons} | raw_output: {raw_output}".format(
+                        mode=self._normalize_text(row.get("mode")),
+                        status=self._normalize_text(row.get("parse_status")),
+                        reasons=", ".join(row.get("fallback_reasons", []) or []) or "нет",
+                        raw_output=self._normalize_text(row.get("raw_output")),
+                    )
+                )
+
+        path = Path("reports/annotation_trace_report.md")
+        self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
+        return str(path)
+
+    def write_annotation_trace_context(self, annotation_trace: dict[str, Any]) -> str:
+        """Write a machine-readable trace artifact for the annotation prompt contract."""
+
+        path = Path("data/interim/annotation_trace.json")
+        self.registry.save_json(path, annotation_trace)
+        return str(path)
+
     def write_al_report(self, history: list[dict[str, Any]]) -> str:
         """Write an active-learning report with the per-iteration history."""
 

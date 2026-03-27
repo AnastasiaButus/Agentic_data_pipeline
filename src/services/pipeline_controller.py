@@ -73,6 +73,10 @@ class PipelineController:
 
         annotated = self.annotation_agent.auto_label(cleaned)
         annotation_summary = self.annotation_agent.check_quality(annotated)
+        annotation_trace_getter = getattr(self.annotation_agent, "get_annotation_trace", None)
+        annotation_trace = annotation_trace_getter() if callable(annotation_trace_getter) else {}
+        annotation_trace_report_path = self.reporting_service.write_annotation_trace_report(annotation_trace)
+        annotation_trace_context_path = self.reporting_service.write_annotation_trace_context(annotation_trace)
         annotation_report_path = self.reporting_service.write_annotation_report(annotated, annotation_summary)
 
         # Export the reviewer queue before consuming corrected labels so HITL semantics stay consistent.
@@ -148,6 +152,8 @@ class PipelineController:
                 },
                 "annotation": {
                     "annotation_report_path": annotation_report_path,
+                    "annotation_trace_report_path": annotation_trace_report_path,
+                    "annotation_trace_context_path": annotation_trace_context_path,
                     "confidence_threshold": annotation_summary.get("confidence_threshold"),
                     "n_low_confidence": annotation_summary.get("n_low_confidence"),
                 },
@@ -188,6 +194,8 @@ class PipelineController:
                 "eda_report": eda_report_path,
                 "eda_context": eda_context_path,
                 "annotation_report": annotation_report_path,
+                "annotation_trace_report": annotation_trace_report_path,
+                "annotation_trace_context": annotation_trace_context_path,
                 "review_queue_report": review_queue_report_path,
                 "review_queue_context": review_queue_context_path,
                 "review_merge_report": review_merge_report_path,

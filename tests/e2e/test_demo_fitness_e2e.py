@@ -51,8 +51,11 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
     assert "## Approval" in final_report
     assert "## EDA" in final_report
+    assert "## Annotation" in final_report
     assert "eda_report_path" in final_report
     assert "eda_context_path" in final_report
+    assert "annotation_trace_report_path" in final_report
+    assert "annotation_trace_context_path" in final_report
     assert "approval_status: skipped_missing_file" in final_report
     assert "review_merge_report_path" in final_report
     approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
@@ -67,6 +70,13 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert review_queue_context["confidence_threshold"] == loaded_config.annotation.confidence_threshold
     assert review_queue_context["n_rows"] >= 0
     assert review_queue_context["label_options"] == loaded_config.annotation.effect_labels
+    annotation_trace_report = (tmp_path / "reports" / "annotation_trace_report.md").read_text(encoding="utf-8")
+    assert "Трассировка annotation contract" in annotation_trace_report
+    assert "Верни только JSON" in annotation_trace_report
+    annotation_trace_context = json.loads((tmp_path / "data" / "interim" / "annotation_trace.json").read_text(encoding="utf-8"))
+    assert "prompt_contract" in annotation_trace_context
+    assert "parser_contract" in annotation_trace_context
+    assert annotation_trace_context["n_rows"] >= 0
     eda_report = (tmp_path / "reports" / "eda_report.md").read_text(encoding="utf-8")
     assert "EDA-пакет" in eda_report
     assert "Это краткий честный EDA-отчет" in eda_report
@@ -90,5 +100,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert "Fitness Supplements Offline Demo" in (tmp_path / "data" / "raw" / "discovered_sources.json").read_text(encoding="utf-8")
     assert captured_report["summary"]["approval"]["approval_status"] == "skipped_missing_file"
+    assert Path(captured_report["summary"]["annotation"]["annotation_trace_report_path"]).as_posix() == "reports/annotation_trace_report.md"
+    assert Path(captured_report["summary"]["annotation"]["annotation_trace_context_path"]).as_posix() == "data/interim/annotation_trace.json"
     assert Path(captured_report["summary"]["eda"]["eda_report_path"]).as_posix() == "reports/eda_report.md"
     assert Path(captured_report["summary"]["eda"]["eda_context_path"]).as_posix() == "data/interim/eda_context.json"

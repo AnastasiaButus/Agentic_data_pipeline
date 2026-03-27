@@ -36,8 +36,11 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
     assert "## Approval" in final_report
     assert "## EDA" in final_report
+    assert "## Annotation" in final_report
     assert "eda_report_path" in final_report
     assert "eda_context_path" in final_report
+    assert "annotation_trace_report_path" in final_report
+    assert "annotation_trace_context_path" in final_report
     assert "approval_status: skipped_missing_file" in final_report
     approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
     assert isinstance(approval_candidates, list)
@@ -51,6 +54,13 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert review_queue_context["confidence_threshold"] == loaded_config.annotation.confidence_threshold
     assert review_queue_context["n_rows"] >= 0
     assert review_queue_context["label_options"] == loaded_config.annotation.effect_labels
+    annotation_trace_report = (tmp_path / "reports" / "annotation_trace_report.md").read_text(encoding="utf-8")
+    assert "Трассировка annotation contract" in annotation_trace_report
+    assert "Верни только JSON" in annotation_trace_report
+    annotation_trace_context = json.loads((tmp_path / "data" / "interim" / "annotation_trace.json").read_text(encoding="utf-8"))
+    assert "prompt_contract" in annotation_trace_context
+    assert "parser_contract" in annotation_trace_context
+    assert annotation_trace_context["n_rows"] >= 0
     eda_report = (tmp_path / "reports" / "eda_report.md").read_text(encoding="utf-8")
     assert "EDA-пакет" in eda_report
     assert "Это краткий честный EDA-отчет" in eda_report
@@ -138,6 +148,30 @@ def test_eda_pack_handles_empty_quality_output(monkeypatch, tmp_path: Path) -> N
         def _effect_label_vocabulary(self):
             return ["energy", "side_effects", "other"]
 
+        def get_annotation_trace(self):
+            return {
+                "prompt_contract": {
+                    "language": "ru",
+                    "task": "auto_annotation",
+                    "input_fields": ["text", "rating"],
+                    "output_fields": ["effect_label", "sentiment_label", "confidence"],
+                    "sentiment_labels": ["negative", "neutral", "positive"],
+                    "effect_labels": ["energy", "side_effects", "other"],
+                    "prompt_preview": "Ты разметчик отзывов о пищевых добавках. Верни только JSON без пояснений, markdown и лишнего текста.",
+                    "expected_output_example": {"effect_label": "other", "sentiment_label": "positive", "confidence": 0.5},
+                },
+                "parser_contract": {
+                    "preferred_format": "json",
+                    "accepted_fallbacks": ["key_value", "partial_json", "deterministic_fallback"],
+                    "parse_status_counts": {},
+                    "fallback_reason_counts": {},
+                },
+                "llm_mode": "unknown",
+                "n_rows": 0,
+                "n_fallback_rows": 0,
+                "fallback_rows": [],
+            }
+
     class FakeReviewQueueService:
         def export_low_confidence_queue(self, df, threshold=0.7):
             target = tmp_path / "data" / "interim" / "review_queue.csv"
@@ -179,6 +213,13 @@ def test_eda_pack_handles_empty_quality_output(monkeypatch, tmp_path: Path) -> N
     assert result["review_status"] == "skipped_missing_corrected_queue"
     assert "Датасет пустой" in eda_report
     assert "колонки" in eda_report.lower() or "Колонки" in eda_report
+    annotation_trace_report = (tmp_path / "reports" / "annotation_trace_report.md").read_text(encoding="utf-8")
+    annotation_trace_context = json.loads((tmp_path / "data" / "interim" / "annotation_trace.json").read_text(encoding="utf-8"))
+    assert "Трассировка annotation contract" in annotation_trace_report
+    assert annotation_trace_context["n_rows"] == 0
+    assert annotation_trace_context["n_fallback_rows"] == 0
+    assert (tmp_path / "reports" / "annotation_trace_report.md").exists()
+    assert (tmp_path / "data" / "interim" / "annotation_trace.json").exists()
     assert eda_context["n_rows"] == 0
     assert eda_context["columns"] == []
     assert eda_context["source_distribution"]["available"] is False

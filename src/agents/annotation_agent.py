@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+import json
+import re
 from typing import Any
 
 from src.agents.base_agent import BaseAgent
@@ -20,6 +23,8 @@ except ImportError:  # pragma: no cover - fallback keeps local/offline tests run
 
 ANNOTATION_COLUMNS = ("sentiment_label", "effect_label", "confidence")
 EFFECT_LABELS = ["energy", "side_effects", "other"]
+ANNOTATION_OUTPUT_FIELDS = ["effect_label", "sentiment_label", "confidence"]
+ANNOTATION_SENTIMENT_LABELS = ["negative", "neutral", "positive"]
 
 
 class AnnotationAgent(BaseAgent):
@@ -35,6 +40,7 @@ class AnnotationAgent(BaseAgent):
 
         super().__init__(ctx, registry if registry is not None else ArtifactRegistry(ctx))
         self.llm_client = llm_client
+        self._last_annotation_trace: dict[str, Any] = {}
 
     def map_rating_to_sentiment(self, rating: Any) -> str | None:
         """Map the canonical rating field to a deterministic sentiment label."""
@@ -89,21 +95,133 @@ class AnnotationAgent(BaseAgent):
         rows = self._to_records(df)
         output_rows: list[dict[str, Any]] = []
         effect_labels = self._effect_label_vocabulary()
+        trace_rows: list[dict[str, Any]] = []
 
         for row in rows:
             canonical_row = self._canonicalize_row(row)
-            sentiment_label = self.map_rating_to_sentiment(canonical_row.get("rating"))
-            effect_label, confidence = self._predict_effect(canonical_row.get("text"), effect_labels)
+            fallback_sentiment = self.map_rating_to_sentiment(canonical_row.get("rating"))
+            annotation_result = self._classify_annotation_row(canonical_row, effect_labels, fallback_sentiment)
             canonical_row.update(
                 {
-                    "sentiment_label": sentiment_label,
-                    "effect_label": effect_label,
-                    "confidence": confidence,
+                    "sentiment_label": annotation_result["sentiment_label"],
+                    "effect_label": annotation_result["effect_label"],
+                    "confidence": annotation_result["confidence"],
                 }
             )
             output_rows.append(canonical_row)
+            trace_rows.append(annotation_result)
+
+        self._last_annotation_trace = self._build_annotation_trace(rows, output_rows, effect_labels, trace_rows)
 
         return self._build_frame(output_rows)
+
+    def build_annotation_prompt(self, text: Any, effect_labels: list[str] | None = None) -> str:
+        """Build the Russian prompt contract for future LLM-based annotation.
+
+        The prompt is intentionally narrow: it only asks for effect_label, sentiment_label,
+        and confidence so the contract stays easy to parse and stable for offline tests.
+        """
+
+        labels = effect_labels if effect_labels is not None else self._effect_label_vocabulary()
+        labels = [self._normalize_label(label) for label in labels if self._normalize_label(label)]
+        if not labels:
+            labels = list(EFFECT_LABELS)
+
+        text_value = self._normalize_optional_text(text) or "<empty>"
+        return "\n".join(
+            [
+                "Ты разметчик отзывов о пищевых добавках.",
+                "Верни только JSON без пояснений, markdown и лишнего текста.",
+                "",
+                "Заполни ровно эти поля:",
+                "- effect_label: одно из значений списка ниже",
+                "- sentiment_label: negative, neutral или positive",
+                "- confidence: число от 0 до 1",
+                "",
+                f"Допустимые effect_label: {', '.join(labels)}",
+                "",
+                "Правила:",
+                "- Не добавляй новые поля.",
+                "- Если текст неполный или неоднозначный, выбирай самый безопасный вариант.",
+                "- confidence должен отражать уверенность модели, но оставаться в диапазоне 0..1.",
+                "",
+                "Ожидаемый ответ:",
+                '{"effect_label": "...", "sentiment_label": "...", "confidence": 0.0}',
+                "",
+                "Текст отзыва:",
+                text_value,
+            ]
+        )
+
+    def parse_annotation_output(
+        self,
+        output: Any,
+        effect_labels: list[str] | None = None,
+        *,
+        fallback_sentiment: str | None = None,
+    ) -> dict[str, Any]:
+        """Parse an LLM annotation response and apply safe fallbacks for partial output.
+
+        The parser accepts JSON first, then simple key-value lines, and finally falls back to
+        deterministic defaults without failing the pipeline.
+        """
+
+        labels = effect_labels if effect_labels is not None else self._effect_label_vocabulary()
+        labels = [self._normalize_label(label) for label in labels if self._normalize_label(label)] or list(EFFECT_LABELS)
+        fallback_effect = self._fallback_effect_label(labels)
+        fallback_sentiment = self._normalize_sentiment(fallback_sentiment)
+        raw_text = self._normalize_optional_text(output)
+
+        parsed_payload = self._extract_annotation_payload(raw_text)
+        parse_status = "fallback"
+        fallback_reasons: list[str] = []
+
+        effect_label = fallback_effect
+        sentiment_label = fallback_sentiment
+        confidence = 0.5
+
+        if parsed_payload:
+            parse_status = "partial_fallback"
+
+            parsed_effect_label = self._normalize_optional_label(parsed_payload.get("effect_label"))
+            if parsed_effect_label and parsed_effect_label in labels:
+                effect_label = parsed_effect_label
+            else:
+                fallback_reasons.append("effect_label")
+
+            parsed_sentiment_label = self._normalize_sentiment(parsed_payload.get("sentiment_label"))
+            if parsed_sentiment_label is not None:
+                sentiment_label = parsed_sentiment_label
+            elif fallback_sentiment is not None:
+                fallback_reasons.append("sentiment_label")
+
+            parsed_confidence = self._parse_confidence(parsed_payload.get("confidence"))
+            if parsed_confidence is not None:
+                confidence = parsed_confidence
+            else:
+                fallback_reasons.append("confidence")
+
+            if not fallback_reasons:
+                parse_status = "parsed"
+            elif len(fallback_reasons) == 3:
+                parse_status = "fallback"
+
+        else:
+            fallback_reasons.extend(["effect_label", "sentiment_label", "confidence"])
+
+        return {
+            "effect_label": effect_label,
+            "sentiment_label": sentiment_label,
+            "confidence": self._coerce_confidence(confidence),
+            "parse_status": parse_status,
+            "fallback_reasons": fallback_reasons,
+            "raw_output": raw_text,
+        }
+
+    def get_annotation_trace(self) -> dict[str, Any]:
+        """Return the most recent annotation trace for reporting and tests."""
+
+        return deepcopy(self._last_annotation_trace)
 
     def check_quality(self, df_labeled: Any) -> dict[str, Any]:
         """Summarize the labeled batch for future HITL routing and confidence filtering."""
@@ -198,6 +316,221 @@ class AnnotationAgent(BaseAgent):
                 pass
 
         return self._fallback_effect_label(effect_labels), 0.5
+
+    def _classify_annotation_row(
+        self,
+        row: dict[str, Any],
+        effect_labels: list[str],
+        fallback_sentiment: str | None,
+    ) -> dict[str, Any]:
+        """Classify one row while preserving a trace of the contract and fallback path."""
+
+        text = row.get("text")
+        if self.llm_client is not None and hasattr(self.llm_client, "classify_effect"):
+            try:
+                result = self.llm_client.classify_effect(str(text or ""), labels=effect_labels)
+                effect_label = self._normalize_label(getattr(result, "label", "other"))
+                if effect_label not in effect_labels:
+                    effect_label = self._fallback_effect_label(effect_labels)
+                confidence = self._coerce_confidence(getattr(result, "confidence", 0.5))
+                return {
+                    "effect_label": effect_label,
+                    "sentiment_label": fallback_sentiment,
+                    "confidence": confidence,
+                    "mode": "classify_effect",
+                    "parse_status": "direct",
+                    "fallback_reasons": [],
+                    "prompt": self.build_annotation_prompt(text, effect_labels),
+                    "raw_output": getattr(result, "as_dict", lambda: {})(),
+                }
+            except Exception:
+                return self._fallback_annotation_row(text, effect_labels, fallback_sentiment, mode="classify_effect_error")
+
+        if self.llm_client is not None and hasattr(self.llm_client, "generate"):
+            prompt = self.build_annotation_prompt(text, effect_labels)
+            try:
+                raw_output = self.llm_client.generate(prompt)
+            except Exception:
+                return self._fallback_annotation_row(text, effect_labels, fallback_sentiment, mode="generate_error", prompt=prompt)
+
+            parsed = self.parse_annotation_output(raw_output, effect_labels, fallback_sentiment=fallback_sentiment)
+            parsed.update({"mode": "generate_parse", "prompt": prompt})
+            return parsed
+
+        return self._fallback_annotation_row(text, effect_labels, fallback_sentiment, mode="offline_fallback")
+
+    def _fallback_annotation_row(
+        self,
+        text: Any,
+        effect_labels: list[str],
+        fallback_sentiment: str | None,
+        *,
+        mode: str,
+        prompt: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a safe deterministic annotation result when the LLM path is unavailable."""
+
+        effect_label, confidence = self._predict_effect(text, effect_labels)
+        return {
+            "effect_label": effect_label,
+            "sentiment_label": fallback_sentiment,
+            "confidence": confidence,
+            "mode": mode,
+            "parse_status": "fallback",
+            "fallback_reasons": ["effect_label", "sentiment_label", "confidence"],
+            "prompt": prompt or self.build_annotation_prompt(text, effect_labels),
+            "raw_output": "",
+        }
+
+    def _build_annotation_trace(
+        self,
+        input_rows: list[dict[str, Any]],
+        output_rows: list[dict[str, Any]],
+        effect_labels: list[str],
+        row_traces: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Summarize prompt, parser, and fallback behavior for reporting.
+
+        The trace stays compact so it can be written as a small JSON helper artifact.
+        """
+
+        fallback_count = sum(1 for row in row_traces if row.get("parse_status") in {"partial_fallback", "fallback"})
+        parse_status_counts: dict[str, int] = {}
+        fallback_reason_counts: dict[str, int] = {}
+        for row in row_traces:
+            status = self._normalize_text(row.get("parse_status")) or "unknown"
+            parse_status_counts[status] = parse_status_counts.get(status, 0) + 1
+            for reason in row.get("fallback_reasons", []) or []:
+                reason_name = self._normalize_text(reason)
+                if reason_name:
+                    fallback_reason_counts[reason_name] = fallback_reason_counts.get(reason_name, 0) + 1
+
+        prompt_preview = self.build_annotation_prompt(input_rows[0].get("text") if input_rows else "", effect_labels)
+        expected_output_example = {
+            "effect_label": effect_labels[0] if effect_labels else "other",
+            "sentiment_label": "positive",
+            "confidence": 0.5,
+        }
+
+        return {
+            "prompt_contract": {
+                "language": "ru",
+                "task": "auto_annotation",
+                "input_fields": ["text", "rating"],
+                "output_fields": list(ANNOTATION_OUTPUT_FIELDS),
+                "sentiment_labels": list(ANNOTATION_SENTIMENT_LABELS),
+                "effect_labels": list(effect_labels),
+                "prompt_preview": prompt_preview,
+                "expected_output_example": expected_output_example,
+            },
+            "parser_contract": {
+                "preferred_format": "json",
+                "accepted_fallbacks": ["key_value", "partial_json", "deterministic_fallback"],
+                "parse_status_counts": parse_status_counts,
+                "fallback_reason_counts": fallback_reason_counts,
+            },
+            "llm_mode": self._resolve_annotation_mode(),
+            "n_rows": len(output_rows),
+            "n_fallback_rows": fallback_count,
+            "fallback_rows": [row for row in row_traces if row.get("parse_status") in {"partial_fallback", "fallback"}][:5],
+        }
+
+    def _extract_annotation_payload(self, raw_text: str) -> dict[str, Any]:
+        """Extract an annotation payload from JSON or key-value LLM output."""
+
+        if not raw_text:
+            return {}
+
+        candidates = [raw_text]
+        json_fragment = self._extract_json_fragment(raw_text)
+        if json_fragment and json_fragment not in candidates:
+            candidates.append(json_fragment)
+
+        for candidate in candidates:
+            try:
+                payload = json.loads(candidate)
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                return payload
+
+        return self._parse_key_value_payload(raw_text)
+
+    def _extract_json_fragment(self, raw_text: str) -> str:
+        """Extract the first JSON object-like fragment from a raw LLM response."""
+
+        start = raw_text.find("{")
+        end = raw_text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return ""
+        return raw_text[start : end + 1]
+
+    def _parse_key_value_payload(self, raw_text: str) -> dict[str, Any]:
+        """Parse simple key-value annotation output when JSON is missing."""
+
+        payload: dict[str, Any] = {}
+        for line in raw_text.splitlines():
+            match = re.match(r"^\s*([a-zA-Z_]+)\s*[:=]\s*(.+?)\s*$", line)
+            if not match:
+                continue
+            key = self._normalize_text(match.group(1)).lower()
+            value = match.group(2).strip().strip('"').strip("'")
+            payload[key] = value
+        return payload
+
+    def _parse_confidence(self, value: Any) -> float | None:
+        """Parse confidence without crashing on invalid or partially formatted values."""
+
+        if value is None:
+            return None
+        try:
+            numeric = float(str(value).strip().rstrip("%"))
+        except (TypeError, ValueError):
+            return None
+        if numeric > 1.0 and numeric <= 100.0:
+            numeric = numeric / 100.0
+        if numeric != numeric:
+            return None
+        return self._coerce_confidence(numeric)
+
+    def _normalize_sentiment(self, value: Any) -> str | None:
+        """Normalize sentiment labels while keeping missing values explicit."""
+
+        if value is None:
+            return None
+        normalized = self._normalize_text(value).lower().replace(" ", "_").replace("-", "_")
+        if not normalized:
+            return None
+        if normalized in ANNOTATION_SENTIMENT_LABELS:
+            return normalized
+        return None
+
+    def _resolve_annotation_mode(self) -> str:
+        """Describe which annotation path is active for trace reporting."""
+
+        if self.llm_client is None:
+            return "offline_fallback"
+        if hasattr(self.llm_client, "classify_effect"):
+            return "classify_effect"
+        if hasattr(self.llm_client, "generate"):
+            return "generate_parse"
+        return "offline_fallback"
+
+    def _normalize_text(self, value: Any) -> str:
+        """Normalize arbitrary values into stable strings for prompt and trace helpers."""
+
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    def _normalize_optional_text(self, value: Any) -> str:
+        """Normalize text while preserving empty content as an empty string."""
+
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        return str(value).strip()
 
     def _canonicalize_row(self, row: dict[str, Any]) -> dict[str, Any]:
         """Project one row onto the canonical schema and keep only safe canonical fields."""

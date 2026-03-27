@@ -95,6 +95,52 @@ def test_auto_label_adds_annotation_columns_and_preserves_canonical_schema(tmp_p
     assert rows[1]["effect_label"] == "side_effects"
 
 
+def test_annotation_prompt_contract_is_russian_and_structured(tmp_path: Path) -> None:
+    """The annotation prompt should stay narrow and explicit for future LLM providers."""
+
+    agent = AnnotationAgent(_make_context(tmp_path), registry=FakeRegistry())
+
+    prompt = agent.build_annotation_prompt("Пример отзыва", ["energy", "side_effects", "other"])
+
+    assert "Верни только JSON" in prompt
+    assert "effect_label" in prompt
+    assert "sentiment_label" in prompt
+    assert "confidence" in prompt
+    assert "negative, neutral или positive" in prompt
+    assert "energy, side_effects, other" in prompt
+    assert "Пример отзыва" in prompt
+
+
+def test_auto_label_parses_partial_generate_output_with_safe_fallback(tmp_path: Path) -> None:
+    """A partially broken generate() response should not break the pipeline."""
+
+    class FakeLLM:
+        def generate(self, prompt: str) -> str:
+            return '{"effect_label": "energy", "sentiment_label": "positive", "confidence": "oops"}'
+
+    agent = AnnotationAgent(_make_context(tmp_path), llm_client=FakeLLM(), registry=FakeRegistry())
+
+    labeled = agent.auto_label(
+        _Frame(
+            [
+                {"id": "1", "source": "HF", "text": "This supplement gives me more energy.", "label": None, "rating": 5, "created_at": "now", "split": None, "meta_json": "{}"},
+            ]
+        )
+    )
+
+    rows = labeled.to_dict(orient="records")
+    trace = agent.get_annotation_trace()
+
+    assert rows[0]["effect_label"] == "energy"
+    assert rows[0]["sentiment_label"] == "positive"
+    assert rows[0]["confidence"] == 0.5
+    assert trace["llm_mode"] == "generate_parse"
+    assert trace["n_rows"] == 1
+    assert trace["n_fallback_rows"] == 1
+    assert trace["parser_contract"]["parse_status_counts"]["partial_fallback"] == 1
+    assert "confidence" in trace["parser_contract"]["fallback_reason_counts"]
+
+
 def test_auto_label_uses_fallbacks_without_llm_and_handles_empty_input(tmp_path: Path) -> None:
     """The fallback path should be deterministic and empty input should keep the schema intact."""
 

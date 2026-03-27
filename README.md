@@ -40,6 +40,8 @@ The source shortlist report is now written in Russian and is meant for human rev
 
 After auto-annotation, the pipeline also writes `data/interim/review_queue.csv` for manual checking, a Russian `reports/review_queue_report.md` for the reviewer, and a machine-readable `data/interim/review_queue_context.json` helper artifact for tooling or lightweight review UI support.
 
+The annotation stage also writes a compact Russian annotation trace pack: `reports/annotation_trace_report.md` and `data/interim/annotation_trace.json`. It records the prompt contract, the expected output fields, and the parser/fallback behavior used for auto-labeling. This is a reporting artifact layer, not a real API client.
+
 The corrected review queue is still edited by a human separately in `data/interim/review_queue_corrected.csv`.
 
 If a corrected queue is present, the pipeline also writes `reports/review_merge_report.md` and `data/interim/review_merge_context.json` so the human merge step is visible and auditable. This is still an MVP, not a UI.
@@ -105,6 +107,8 @@ A successful demo run produces artifacts such as:
 - `final_report.md`
 - `data/interim/model_metrics.json`
 - `data/interim/review_queue.csv`
+- `reports/annotation_trace_report.md`
+- `data/interim/annotation_trace.json`
 - `reports/eda_report.md`
 - `data/interim/eda_context.json`
 - `data/raw/discovered_sources.json`

@@ -1,4 +1,4 @@
-PyYAML
-pandas
-scikit-learn
-pytest
+PyYAML==6.0.3
+pandas==3.0.1
+scikit-learn==1.8.0
+pytest==9.0.2

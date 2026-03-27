@@ -1,0 +1,39 @@
+project:
+  name: universal-agentic-data-pipeline-minecraft-demo
+  root_dir: .
+
+request:
+  topic: minecraft instructions
+  modality: text
+  task_type: classification
+  domain: minecraft
+  sources_preference:
+    - dataset
+    - api
+    - github_repo
+    - scrape
+  label_schema:
+    sentiment:
+      - positive
+      - neutral
+      - negative
+    effect:
+      - crafting
+      - combat
+      - enchantments
+
+source:
+  use_huggingface: true
+  use_public_api: false
+  use_internal_api: false
+  use_github_search: false
+  use_scraping_fallback: false
+  max_sources: 3
+
+annotation:
+  use_llm: false
+  confidence_threshold: 0.6
+  effect_labels:
+    - crafting
+    - combat
+    - enchantments

@@ -30,23 +30,6 @@ class FakeRegistry:
         return self.files[str(path)]
 
 
-class FakeGitHubClient:
-    """Return a deterministic GitHub API response for discovery tests."""
-
-    def search_repositories(self, query: str, per_page: int = 10) -> dict:
-        return {
-            "items": [
-                {
-                    "full_name": "octocat/fitness-reviews",
-                    "html_url": "https://github.com/octocat/fitness-reviews",
-                    "stargazers_count": 17,
-                    "directory": "docs",
-                    "entries": [{"name": "README.md"}],
-                }
-            ]
-        }
-
-
 def _make_context(tmp_path: Path) -> PipelineContext:
     """Build a minimal pipeline context for discovery tests."""
 
@@ -106,38 +89,72 @@ def test_run_saves_discovered_sources_json(monkeypatch, tmp_path: Path) -> None:
     assert payload[0]["source_id"] == "api-1"
 
 
-def test_search_github_repos_transforms_response_to_candidates(tmp_path: Path) -> None:
+def test_search_github_repos_transforms_response_to_candidates(monkeypatch, tmp_path: Path) -> None:
     """GitHub search results should become github_repo SourceCandidate objects."""
 
-    service = SourceDiscoveryService(_make_context(tmp_path), github_client=FakeGitHubClient())
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
+    service = SourceDiscoveryService(context)
+
+    captured: dict[str, object] = {}
+    payload = {
+        "items": [
+            {
+                "full_name": "octocat/fitness-reviews",
+                "html_url": "https://github.com/octocat/fitness-reviews",
+                "stargazers_count": 17,
+                "language": "Python",
+                "description": "Repository for review tooling",
+                "topics": ["reviews", "fitness", "pipeline"],
+                "directory": "docs",
+                "entries": [{"name": "README.md"}],
+            }
+        ]
+    }
+
+    def fake_fetch(topic: str) -> dict:
+        captured["topic"] = topic
+        return payload
+
+    monkeypatch.setattr(service, "_fetch_github_repositories", fake_fetch)
     candidates = service.search_github_repos()
 
     assert len(candidates) == 1
     assert candidates[0].source_type == "github_repo"
     assert candidates[0].source_id == "octocat/fitness-reviews"
-    assert candidates[0].metadata["directory"] == "docs"
-    assert candidates[0].metadata["entries"] == [{"name": "README.md"}]
+    assert candidates[0].title == "octocat/fitness-reviews"
+    assert candidates[0].uri == "https://github.com/octocat/fitness-reviews"
+    assert candidates[0].score == 17.0
+    assert candidates[0].metadata == {
+        "source_kind": "github_search",
+        "stars": 17,
+        "language": "Python",
+        "description": "Repository for review tooling",
+        "topics": ["reviews", "fitness", "pipeline"],
+    }
+    assert captured["topic"] == "fitness supplements"
 
 
-def test_search_github_repos_uses_topic_from_request_config(tmp_path: Path) -> None:
+def test_search_github_repos_uses_topic_from_request_config(monkeypatch, tmp_path: Path) -> None:
     """GitHub search should use the topic from the request config rather than a hardcoded string."""
 
     captured: dict[str, object] = {}
 
-    class RecordingGitHubClient:
-        def search_repositories(self, query: str, per_page: int = 10) -> dict:
-            captured["query"] = query
-            captured["per_page"] = per_page
-            return {"items": []}
-
     context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
     context.config.request.topic = "fitness supplements reviews"
 
-    service = SourceDiscoveryService(context, github_client=RecordingGitHubClient())
+    service = SourceDiscoveryService(context)
+
+    def fake_fetch(topic: str) -> dict:
+        captured["query"] = topic
+        return {"items": []}
+
+    monkeypatch.setattr(service, "_fetch_github_repositories", fake_fetch)
     service.search_github_repos()
 
     assert captured["query"] == "fitness supplements reviews"
-    assert captured["per_page"] == 10
 
 
 def test_non_demo_shortlist_omits_fake_stub_candidates(monkeypatch, tmp_path: Path) -> None:
@@ -160,6 +177,7 @@ def test_non_demo_shortlist_omits_fake_stub_candidates(monkeypatch, tmp_path: Pa
             }
         ]
     })
+    monkeypatch.setattr(service, "_fetch_github_repositories", lambda topic: {"items": []})
 
     ranked = service.run()
 
@@ -170,12 +188,15 @@ def test_non_demo_shortlist_omits_fake_stub_candidates(monkeypatch, tmp_path: Pa
     assert [row["source_type"] for row in payload] == ["hf_dataset"]
 
 
-def test_search_github_repos_without_client_returns_empty_list(tmp_path: Path) -> None:
-    """Non-demo GitHub discovery should stay empty when no client is injected."""
+def test_search_github_repos_failure_falls_back_safely(monkeypatch, tmp_path: Path) -> None:
+    """GitHub discovery should return an empty list when lookup fails."""
 
     context = _make_context(tmp_path)
     context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
     service = SourceDiscoveryService(context)
+
+    monkeypatch.setattr(service, "_fetch_github_repositories", lambda topic: (_ for _ in ()).throw(RuntimeError("network down")))
 
     assert service.search_github_repos() == []
 
@@ -336,6 +357,48 @@ def test_non_demo_config_uses_real_huggingface_path(monkeypatch, tmp_path: Path)
     assert candidate.metadata["tags"] == ["text-classification", "reviews"]
 
 
+def test_non_demo_shortlist_can_include_hf_and_github_real_candidates(monkeypatch, tmp_path: Path) -> None:
+    """Non-demo discovery should be able to shortlist both HF and GitHub candidates."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
+    registry = FakeRegistry()
+    service = SourceDiscoveryService(context, registry=registry)
+
+    monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: {
+        "datasets": [
+            {
+                "id": "fitness/supplements-reviews",
+                "title": "Fitness Supplements Reviews",
+                "downloads": 1234,
+                "likes": 56,
+                "tags": ["text-classification", "reviews"],
+            }
+        ]
+    })
+    monkeypatch.setattr(service, "_fetch_github_repositories", lambda topic: {
+        "items": [
+            {
+                "full_name": "octocat/fitness-reviews",
+                "html_url": "https://github.com/octocat/fitness-reviews",
+                "stargazers_count": 17,
+                "language": "Python",
+                "description": "Repository for review tooling",
+            }
+        ]
+    })
+
+    ranked = service.run()
+
+    assert [candidate.source_type for candidate in ranked] == ["hf_dataset", "github_repo"]
+    assert [candidate.source_id for candidate in ranked] == ["fitness/supplements-reviews", "octocat/fitness-reviews"]
+    assert registry.saved is not None
+    payload = registry.saved[1]
+    assert isinstance(payload, list)
+    assert [row["source_type"] for row in payload] == ["hf_dataset", "github_repo"]
+
+
 def test_real_huggingface_candidate_uses_canonical_dataset_id_uri(monkeypatch, tmp_path: Path) -> None:
     """Real HF discovery should store canonical dataset ids in uri and the page URL in metadata."""
 
@@ -374,6 +437,7 @@ def test_real_huggingface_path_failure_falls_back_safely(monkeypatch, tmp_path: 
     service = SourceDiscoveryService(context, registry=registry)
 
     monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: (_ for _ in ()).throw(RuntimeError("network down")))
+    monkeypatch.setattr(service, "_fetch_github_repositories", lambda topic: (_ for _ in ()).throw(RuntimeError("network down")))
 
     ranked = service.run()
 

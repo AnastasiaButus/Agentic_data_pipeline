@@ -24,7 +24,7 @@ The main training target is `text -> effect_label`.
 The repository currently supports two discovery modes:
 
 - Offline demo mode for the persistent fitness and minecraft configs. This path is deterministic and designed for reproducible local coursework runs.
-- Emerging online discovery mode for non-demo configs. The first online capability is a Hugging Face datasets discovery MVP that searches by the current request topic and shortlists candidate datasets without auto-adding artificial API, GitHub, or scrape stubs.
+- Emerging online discovery mode for non-demo configs. The online discovery path now includes a Hugging Face datasets discovery MVP plus a narrow GitHub repository discovery MVP that both search by the current request topic without auto-adding artificial API, GitHub, or scrape stubs.
 
 The online path is discovery-only at this stage. It does not replace the offline demo flow and should not be read as a fully production-ready online agent.
 
@@ -60,6 +60,12 @@ For real Hugging Face candidates, discovery stores the canonical dataset id in `
 
 If the online lookup fails, the service falls back safely instead of breaking the pipeline. The offline demo path remains unchanged and still uses the local deterministic payloads.
 
+## GitHub Discovery MVP
+
+For non-demo configs, source discovery can also query the public GitHub repository search API using the current request topic.
+
+This is a discovery-only MVP. It maps real repository results into shortlist candidates, falls back safely on lookup failures, and does not add any GitHub collection logic.
+
 ## Hugging Face Collection MVP
 
 The online capability now also includes a narrow Hugging Face collection path for shortlisted datasets. The collection loader accepts either a Hugging Face dataset id or a Hugging Face dataset URL and normalizes it before loading.
@@ -94,7 +100,7 @@ A successful demo run produces artifacts such as:
 
 - Online discovery is not complete.
 - The online capability currently starts with Hugging Face datasets discovery and does not cover the full collection pipeline.
-- The online capability now includes Hugging Face discovery plus a minimal Hugging Face collection MVP, but it is still not a full production-ready online pipeline.
+- The online capability now includes Hugging Face discovery, GitHub repository discovery MVP, and a minimal Hugging Face collection MVP, but it is still not a full production-ready online pipeline.
 - The approval gate MVP is file-based and intentionally minimal; it only filters shortlist candidates by approved `source_id` values.
 - The demo datasets are intentionally small and synthetic/local.
 - The offline demo path is meant for reproducible coursework-style runs, not for production use.

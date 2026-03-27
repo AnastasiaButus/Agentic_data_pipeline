@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from urllib.parse import quote_plus
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +14,7 @@ from src.services.artifact_registry import ArtifactRegistry
 
 
 class SourceDiscoveryService:
-    """Produce ranked source candidates using deterministic discovery stubs."""
+    """Produce ranked source candidates using offline demo and narrow online discovery."""
 
     def __init__(self, ctx: PipelineContext, github_client: Any | None = None, registry: ArtifactRegistry | None = None) -> None:
         """Bind the discovery service to the active execution context."""
@@ -129,13 +129,20 @@ class SourceDiscoveryService:
         ]
 
     def search_github_repos(self) -> list[SourceCandidate]:
-        """Use the configured GitHub client when present and map results to candidates."""
+        """Search GitHub repositories for the current topic and map results to candidates."""
 
-        if self.github_client is None:
+        topic = str(getattr(self.ctx.config.request, "topic", "")).strip()
+        if not topic:
             return []
 
-        topic = self.ctx.config.request.topic
-        response = self.github_client.search_repositories(topic, per_page=10)
+        try:
+            if self.github_client is not None:
+                response = self.github_client.search_repositories(topic, per_page=10)
+            else:
+                response = self._fetch_github_repositories(topic)
+        except Exception:
+            return []
+
         items = response.get("items") if isinstance(response, dict) else None
         if items is None:
             items = [response]
@@ -148,8 +155,22 @@ class SourceDiscoveryService:
             source_id = item.get("full_name") or item.get("name") or item.get("html_url") or "github_repo"
             title = item.get("full_name") or item.get("name") or source_id
             uri = item.get("html_url") or item.get("clone_url") or item.get("url") or ""
-            score = float(item.get("stargazers_count") or item.get("score") or 0.0)
-            metadata = {key: value for key, value in item.items() if key not in {"full_name", "name", "html_url", "clone_url", "url", "stargazers_count", "score"}}
+            score = self._score_github_candidate(item.get("stargazers_count"), item.get("score"))
+            metadata = {"source_kind": "github_search"}
+
+            stars = item.get("stargazers_count")
+            language = item.get("language")
+            description = item.get("description")
+            topics = item.get("topics") if isinstance(item.get("topics"), list) else []
+
+            if stars is not None:
+                metadata["stars"] = stars
+            if language:
+                metadata["language"] = language
+            if description:
+                metadata["description"] = description
+            if topics:
+                metadata["topics"] = topics[:5]
 
             candidates.append(
                 SourceCandidate(
@@ -326,6 +347,28 @@ class SourceDiscoveryService:
             return {"datasets": payload}
         return payload
 
+    def _fetch_github_repositories(self, topic: str) -> dict[str, Any]:
+        """Fetch the GitHub repository search payload for a topic.
+
+        The helper is isolated so tests can monkeypatch it and production discovery stays narrow.
+        """
+
+        url = f"https://api.github.com/search/repositories?q={quote_plus(topic)}&sort=stars&order=desc&per_page=10"
+        request = Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "universal-agentic-data-pipeline",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        with urlopen(request, timeout=5) as response:
+            raw = response.read().decode("utf-8")
+        payload = json.loads(raw)
+        if isinstance(payload, list):
+            return {"items": payload}
+        return payload
+
     def _score_huggingface_candidate(self, downloads: Any, likes: Any) -> float:
         """Convert Hugging Face popularity signals into a compact ranking score."""
 
@@ -343,6 +386,11 @@ class SourceDiscoveryService:
         if numeric != numeric:
             return 0.0
         return max(0.0, numeric)
+
+    def _score_github_candidate(self, stargazers_count: Any, search_score: Any) -> float:
+        """Convert GitHub popularity signals into a compact ranking score."""
+
+        return max(self._coerce_float(stargazers_count), self._coerce_float(search_score))
 
     def _fitness_demo_html(self) -> str:
         """Return a local HTML payload with fitness supplement review blocks."""

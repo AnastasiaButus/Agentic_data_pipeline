@@ -110,3 +110,27 @@ def test_hf_loader_normalizes_tree_and_viewer_urls() -> None:
 
     assert loader._normalize_dataset_name("https://huggingface.co/datasets/owner/name/tree/main") == "owner/name"
     assert loader._normalize_dataset_name("https://huggingface.co/datasets/owner/name/viewer/default/train") == "owner/name"
+
+
+def test_hf_loader_accepts_www_huggingface_host() -> None:
+    """The canonical www host should normalize exactly like huggingface.co."""
+
+    loader = HFDatasetLoader()
+
+    assert loader._normalize_dataset_name("https://www.huggingface.co/datasets/owner/name") == "owner/name"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evilhuggingface.co/datasets/owner/name",
+        "https://huggingface.co.evil.com/datasets/owner/name",
+        "https://huggingface.co@evil.com/datasets/owner/name",
+    ],
+)
+def test_hf_loader_rejects_tricky_non_huggingface_hosts(url: str) -> None:
+    """Deceptive hosts must not be treated as Hugging Face dataset URLs."""
+
+    loader = HFDatasetLoader()
+
+    assert loader._normalize_dataset_name(url) == url

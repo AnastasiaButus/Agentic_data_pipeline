@@ -133,7 +133,8 @@ class HFDatasetLoader:
             return candidate
 
         parsed = urlparse(candidate)
-        if parsed.scheme in {"http", "https"} and parsed.netloc.endswith("huggingface.co"):
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme in {"http", "https"} and host in {"huggingface.co", "www.huggingface.co"}:
             path_parts = [part for part in parsed.path.split("/") if part]
             if len(path_parts) >= 2 and path_parts[0] == "datasets":
                 return "/".join(path_parts[1:3])

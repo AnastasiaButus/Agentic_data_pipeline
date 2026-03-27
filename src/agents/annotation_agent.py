@@ -111,9 +111,11 @@ class AnnotationAgent(BaseAgent):
         confidence_values: list[float] = []
         threshold = self._confidence_threshold()
         n_low_confidence = 0
+        use_effect_labels = any(self._normalize_label(row.get("effect_label")) for row in rows)
 
         for row in rows:
-            label = self._normalize_label(row.get("sentiment_label") or row.get("label") or "other")
+            raw_label = row.get("effect_label") if use_effect_labels else row.get("label")
+            label = self._normalize_label(raw_label or "other")
             label_counts[label] = label_counts.get(label, 0) + 1
 
             confidence = self._coerce_confidence(row.get("confidence"))

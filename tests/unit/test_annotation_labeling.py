@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from src.agents.annotation_agent import AnnotationAgent
 from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, SourceConfig
 from src.core.context import PipelineContext
@@ -146,6 +148,37 @@ def test_check_quality_reports_core_metrics(tmp_path: Path) -> None:
     assert "label_dist" in report
     assert "confidence_mean" in report
     assert "n_low_confidence" in report
+
+
+def test_check_quality_uses_effect_labels_when_present(tmp_path: Path) -> None:
+    """Quality summaries should prefer effect_label and ignore conflicting label values."""
+
+    agent = AnnotationAgent(_make_context(tmp_path), registry=FakeRegistry())
+
+    report = agent.check_quality(
+        _Frame(
+            [
+                {"id": "1", "source": "HF", "text": "Crafting instructions", "label": "positive", "effect_label": "crafting", "confidence": 0.9, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+                {"id": "2", "source": "HF", "text": "Combat tips", "label": "negative", "effect_label": "combat", "confidence": 0.4, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+                {"id": "3", "source": "HF", "text": "Enchantments guide", "label": "neutral", "effect_label": "crafting", "confidence": 0.8, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+            ]
+        )
+    )
+
+    assert report["label_dist"] == {"crafting": 2 / 3, "combat": 1 / 3}
+    assert report["n_rows"] == 3
+    assert report["confidence_mean"] == pytest.approx((0.9 + 0.4 + 0.8) / 3)
+    assert report["n_low_confidence"] == 1
+
+
+def test_check_quality_empty_input_is_safe(tmp_path: Path) -> None:
+    """Empty labeled input should return a safe zeroed summary."""
+
+    agent = AnnotationAgent(_make_context(tmp_path), registry=FakeRegistry())
+
+    report = agent.check_quality(_Frame([]))
+
+    assert report == {"label_dist": {}, "confidence_mean": 0.0, "n_low_confidence": 0, "n_rows": 0}
 
 
 def test_auto_label_uses_configured_effect_labels(tmp_path: Path) -> None:

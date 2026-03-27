@@ -19,6 +19,15 @@ The project is not presented as production-ready. The real online discovery path
 
 The main training target is `text -> effect_label`.
 
+## Discovery Modes
+
+The repository currently supports two discovery modes:
+
+- Offline demo mode for the persistent fitness and minecraft configs. This path is deterministic and designed for reproducible local coursework runs.
+- Emerging online discovery mode for non-demo configs. The first online capability is a Hugging Face datasets discovery MVP that searches by the current request topic and shortlists candidate datasets without auto-adding artificial API, GitHub, or scrape stubs.
+
+The online path is discovery-only at this stage. It does not replace the offline demo flow and should not be read as a fully production-ready online agent.
+
 ## Human-in-the-Loop Point
 
 Human-in-the-loop review happens after annotation. Low-confidence rows are exported to a review queue, corrected labels can be merged back by canonical `id`, and downstream stages continue from the reviewed data.
@@ -43,6 +52,12 @@ python run_pipeline.py --config configs/demo_minecraft.yaml
 
 These demo paths are designed to work offline and do not require network access.
 
+## Hugging Face Discovery MVP
+
+For non-demo configs, source discovery can now query the public Hugging Face datasets search API using the request topic. This is a narrow discovery and shortlisting step only.
+
+If the online lookup fails, the service falls back safely instead of breaking the pipeline. The offline demo path remains unchanged and still uses the local deterministic payloads.
+
 ## Artifacts Produced
 
 A successful demo run produces artifacts such as:
@@ -56,6 +71,7 @@ A successful demo run produces artifacts such as:
 ## Current Limitations
 
 - Online discovery is not complete.
+- The online capability currently starts with Hugging Face datasets discovery and does not cover the full collection pipeline.
 - The demo datasets are intentionally small and synthetic/local.
 - The offline demo path is meant for reproducible coursework-style runs, not for production use.
 - Some stages are intentionally deterministic to keep the baseline stable for local execution.

@@ -131,21 +131,139 @@ def test_search_github_repos_uses_topic_from_request_config(tmp_path: Path) -> N
     assert captured["per_page"] == 10
 
 
-def test_search_github_repos_without_client_returns_stub_candidate(tmp_path: Path) -> None:
-    """The GitHub discovery stub should remain available when no client is injected."""
+def test_non_demo_shortlist_omits_fake_stub_candidates(monkeypatch, tmp_path: Path) -> None:
+    """Non-demo discovery should not auto-add fake API, GitHub, or scrape stubs."""
 
-    service = SourceDiscoveryService(_make_context(tmp_path))
-    candidates = service.search_github_repos()
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
+    registry = FakeRegistry()
+    service = SourceDiscoveryService(context, registry=registry)
 
-    assert len(candidates) == 1
-    assert candidates[0].source_type == "github_repo"
+    monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: {
+        "datasets": [
+            {
+                "id": "fitness/supplements-reviews",
+                "title": "Fitness Supplements Reviews",
+                "downloads": 1234,
+                "likes": 56,
+                "tags": ["text-classification", "reviews"],
+            }
+        ]
+    })
+
+    ranked = service.run()
+
+    assert [candidate.source_type for candidate in ranked] == ["hf_dataset"]
+    assert registry.saved is not None
+    payload = registry.saved[1]
+    assert isinstance(payload, list)
+    assert [row["source_type"] for row in payload] == ["hf_dataset"]
+
+
+def test_search_github_repos_without_client_returns_empty_list(tmp_path: Path) -> None:
+    """Non-demo GitHub discovery should stay empty when no client is injected."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    service = SourceDiscoveryService(context)
+
+    assert service.search_github_repos() == []
 
 
 def test_internal_api_candidates_use_api_source_type(tmp_path: Path) -> None:
     """Internal API discovery should keep the generic api source type and mark kind in metadata."""
 
-    service = SourceDiscoveryService(_make_context(tmp_path))
+    config = AppConfig(
+        project=ProjectConfig(name="universal-agentic-data-pipeline-fitness-demo", root_dir=tmp_path),
+        source=SourceConfig(use_huggingface=True),
+        annotation=AnnotationConfig(),
+    )
+    service = SourceDiscoveryService(PipelineContext.from_config(config))
     candidates = service.search_internal_apis()
 
     assert candidates[0].source_type == "api"
     assert candidates[0].metadata["api_kind"] == "internal"
+
+
+def test_non_demo_stub_methods_return_empty_lists(tmp_path: Path) -> None:
+    """Non-demo configs should not get fake API or scrape stub candidates."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    service = SourceDiscoveryService(context)
+
+    assert service.search_internal_apis() == []
+    assert service.search_public_apis() == []
+    assert service.search_web_pages_for_scraping() == []
+
+
+def test_demo_config_keeps_offline_demo_path(tmp_path: Path) -> None:
+    """Explicit demo configs should continue to use the offline demo discovery path."""
+
+    config = AppConfig(
+        project=ProjectConfig(name="universal-agentic-data-pipeline-fitness-demo", root_dir=tmp_path),
+        source=SourceConfig(use_huggingface=True),
+        annotation=AnnotationConfig(),
+    )
+    context = PipelineContext.from_config(config)
+    service = SourceDiscoveryService(context)
+
+    discovered = service.run()
+
+    assert discovered[0].source_type == "scrape"
+    assert discovered[0].uri == "demo://fitness-supplements"
+
+
+def test_non_demo_config_uses_real_huggingface_path(monkeypatch, tmp_path: Path) -> None:
+    """Non-demo configs should call the real Hugging Face search helper."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
+    service = SourceDiscoveryService(context)
+
+    payload = {
+        "datasets": [
+            {
+                "id": "fitness/supplements-reviews",
+                "title": "Fitness Supplements Reviews",
+                "downloads": 1234,
+                "likes": 56,
+                "tags": ["text-classification", "reviews"],
+            }
+        ]
+    }
+    monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: payload)
+
+    candidates = service.search_huggingface()
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.source_type == "hf_dataset"
+    assert candidate.source_id == "fitness/supplements-reviews"
+    assert candidate.title == "Fitness Supplements Reviews"
+    assert candidate.uri == "https://huggingface.co/datasets/fitness/supplements-reviews"
+    assert candidate.metadata["source_kind"] == "hf_search"
+    assert candidate.metadata["downloads"] == 1234
+    assert candidate.metadata["likes"] == 56
+    assert candidate.metadata["tags"] == ["text-classification", "reviews"]
+
+
+def test_real_huggingface_path_failure_falls_back_safely(monkeypatch, tmp_path: Path) -> None:
+    """Network failures in the real Hugging Face path should not break run()."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
+    registry = FakeRegistry()
+    service = SourceDiscoveryService(context, registry=registry)
+
+    monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: (_ for _ in ()).throw(RuntimeError("network down")))
+
+    ranked = service.run()
+
+    assert ranked == []
+    assert registry.saved is not None
+    assert registry.saved[0] == "data/raw/discovered_sources.json"
+    assert registry.saved[1] == []

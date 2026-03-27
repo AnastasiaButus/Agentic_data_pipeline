@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from urllib.parse import quote_plus
+from urllib.request import urlopen
 from pathlib import Path
 from typing import Any
 
@@ -21,21 +24,81 @@ class SourceDiscoveryService:
         self.registry = registry if registry is not None else ArtifactRegistry(ctx)
 
     def search_huggingface(self) -> list[SourceCandidate]:
-        """Return a deterministic Hugging Face dataset candidate."""
+        """Return Hugging Face dataset candidates, preferring the real search path when possible."""
 
-        return [
-            SourceCandidate(
-                source_id="hf_fitness_supplements_reviews",
-                source_type="hf_dataset",
-                title="Fitness Supplements Reviews Dataset",
-                uri="fitness-supplements/reviews",
-                score=0.95,
-                metadata={"domain": "fitness_supplements", "source_kind": "dataset"},
+        demo_key = self._demo_key()
+        if demo_key == "fitness":
+            return [
+                SourceCandidate(
+                    source_id="hf_fitness_supplements_reviews",
+                    source_type="hf_dataset",
+                    title="Fitness Supplements Reviews Dataset",
+                    uri="fitness-supplements/reviews",
+                    score=0.95,
+                    metadata={"domain": "fitness_supplements", "source_kind": "dataset"},
+                )
+            ]
+
+        return self.search_huggingface_real()
+
+    def search_huggingface_real(self) -> list[SourceCandidate]:
+        """Search the public Hugging Face datasets API for the current topic.
+
+        This is a narrow discovery-only MVP. It converts the API response into SourceCandidate
+        rows and returns an empty list if the request fails for any reason.
+        """
+
+        topic = str(getattr(self.ctx.config.request, "topic", "")).strip()
+        if not topic:
+            return []
+
+        try:
+            payload = self._fetch_huggingface_datasets(topic)
+        except Exception:
+            return []
+
+        items = payload.get("datasets") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            return []
+
+        candidates: list[SourceCandidate] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            dataset_id = str(item.get("id") or item.get("dataset_id") or item.get("full_name") or "hf_dataset")
+            title = str(item.get("title") or item.get("id") or dataset_id)
+            downloads = item.get("downloads")
+            likes = item.get("likes")
+            tags = item.get("tags") if isinstance(item.get("tags"), list) else []
+            score = self._score_huggingface_candidate(downloads, likes)
+            metadata = {"source_kind": "hf_search"}
+
+            if downloads is not None:
+                metadata["downloads"] = downloads
+            if likes is not None:
+                metadata["likes"] = likes
+            if tags:
+                metadata["tags"] = tags
+
+            candidates.append(
+                SourceCandidate(
+                    source_id=dataset_id,
+                    source_type="hf_dataset",
+                    title=title,
+                    uri=f"https://huggingface.co/datasets/{dataset_id}",
+                    score=score,
+                    metadata=metadata,
+                )
             )
-        ]
+
+        return candidates
 
     def search_internal_apis(self) -> list[SourceCandidate]:
         """Return deterministic candidates for hidden or internal APIs."""
+
+        if self._demo_key() is None:
+            return []
 
         return [
             SourceCandidate(
@@ -50,6 +113,9 @@ class SourceDiscoveryService:
 
     def search_public_apis(self) -> list[SourceCandidate]:
         """Return deterministic candidates for public APIs."""
+
+        if self._demo_key() is None:
+            return []
 
         return [
             SourceCandidate(
@@ -66,16 +132,7 @@ class SourceDiscoveryService:
         """Use the configured GitHub client when present and map results to candidates."""
 
         if self.github_client is None:
-            return [
-                SourceCandidate(
-                    source_id="github_reviews_stub",
-                    source_type="github_repo",
-                    title="Fitness Reviews Repo",
-                    uri="https://github.com/example/fitness-reviews",
-                    score=0.7,
-                    metadata={"source_kind": "github_stub"},
-                )
-            ]
+            return []
 
         topic = self.ctx.config.request.topic
         response = self.github_client.search_repositories(topic, per_page=10)
@@ -109,6 +166,9 @@ class SourceDiscoveryService:
 
     def search_web_pages_for_scraping(self) -> list[SourceCandidate]:
         """Return a deterministic scraping fallback candidate without implementing scraping."""
+
+        if self._demo_key() is None:
+            return []
 
         return [
             SourceCandidate(
@@ -197,6 +257,38 @@ class SourceDiscoveryService:
         if project_name == "universal-agentic-data-pipeline-minecraft-demo":
             return "minecraft"
         return None
+
+    def _fetch_huggingface_datasets(self, topic: str) -> dict[str, Any]:
+        """Fetch the Hugging Face datasets search payload for a topic.
+
+        The helper is isolated so tests can monkeypatch it and production discovery stays narrow.
+        """
+
+        url = f"https://huggingface.co/api/datasets?search={quote_plus(topic)}&limit=10"
+        with urlopen(url, timeout=5) as response:
+            raw = response.read().decode("utf-8")
+        payload = json.loads(raw)
+        if isinstance(payload, list):
+            return {"datasets": payload}
+        return payload
+
+    def _score_huggingface_candidate(self, downloads: Any, likes: Any) -> float:
+        """Convert Hugging Face popularity signals into a compact ranking score."""
+
+        numeric_downloads = self._coerce_float(downloads)
+        numeric_likes = self._coerce_float(likes)
+        return numeric_downloads + (10.0 * numeric_likes)
+
+    def _coerce_float(self, value: Any) -> float:
+        """Convert a value into a non-negative float while tolerating missing fields."""
+
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if numeric != numeric:
+            return 0.0
+        return max(0.0, numeric)
 
     def _fitness_demo_html(self) -> str:
         """Return a local HTML payload with fitness supplement review blocks."""

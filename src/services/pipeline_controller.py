@@ -55,7 +55,9 @@ class PipelineController:
         sources = self.discovery_service.run()
         source_report_path = self.reporting_service.write_source_report(sources)
 
-        collected = self.collection_agent.run(sources)
+        approved_sources = self.discovery_service.load_approved_candidates(sources)
+
+        collected = self.collection_agent.run(approved_sources)
         quality_report = self.quality_agent.detect_issues(collected)
         cleaned = self.quality_agent.run(collected)
         quality_report_path = self.reporting_service.write_quality_report(quality_report)
@@ -113,6 +115,10 @@ class PipelineController:
                     "status": review_status,
                     "review_queue_rows": len(self._to_records(review_queue)),
                 },
+                "approval": {
+                    "approved_sources_path": "data/raw/approved_sources.json",
+                    "n_approved_sources": len(approved_sources),
+                },
                 "active_learning": {
                     "al_report_path": al_report_path,
                     "history": al_history,
@@ -139,6 +145,7 @@ class PipelineController:
                 "final_report": final_report_path,
             },
             "review_status": review_status,
+            "approved_sources": approved_sources,
         }
 
     def _to_records(self, df: Any) -> list[dict[str, Any]]:

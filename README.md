@@ -74,6 +74,12 @@ The MVP uses a simple `data/raw/approved_sources.json` file containing a JSON li
 
 This is a discovery-side approval checkpoint only. It is not a UI, not a production approval workflow, and it does not change the offline demo mode.
 
+## Approval-Aware Collection MVP
+
+The orchestration layer now applies the approval helper between discovery and collection. In practice, the pipeline discovers sources, filters them through `approved_sources.json` when present, and then passes the approved subset to collection.
+
+This remains a file-based MVP, not a full approval subsystem, and it is intentionally narrow so the offline demo baseline stays intact.
+
 ## Artifacts Produced
 
 A successful demo run produces artifacts such as:

@@ -86,21 +86,58 @@ class ReportingService:
         self.registry.save_markdown(path, "\n".join(lines))
         return path
 
-    def write_eda_report(self, df_like: Any) -> str:
+    def write_eda_report(
+        self,
+        df_like: Any,
+        *,
+        raw_df_like: Any | None = None,
+        quality_report: Any | None = None,
+    ) -> str:
         """Write a compact Russian EDA report for the post-quality dataset."""
 
-        summary = self._build_eda_summary(df_like)
+        summary = self._build_extended_eda_summary(
+            df_like,
+            raw_df_like=raw_df_like,
+            quality_report=quality_report,
+        )
         lines = [
             "# EDA-пакет по данным после quality",
             "",
-            "Это краткий честный EDA-отчет по данным, которые реально идут дальше в pipeline.",
-            "Он не подменяет пустые поля выдуманной статистикой и не пытается быть BI-инструментом.",
+            "Это расширенный честный EDA-отчет по данным, которые реально идут дальше в pipeline.",
+            "Он показывает структуру, сравнение raw/cleaned, пропуски и распределения, не подменяя пустые поля выдуманной статистикой.",
             "",
             f"- n_rows: {summary['n_rows']}",
+            f"- column_count: {summary['column_count']}",
             f"- columns: {', '.join(summary['columns']) if summary['columns'] else 'нет'}",
             "",
-            "## Распределение source",
+            "## Raw vs cleaned",
         ]
+
+        raw_vs_cleaned = summary["raw_vs_cleaned"]
+        if raw_vs_cleaned["available"]:
+            lines.extend([
+                f"- raw_rows: {raw_vs_cleaned['raw_rows']}",
+                f"- cleaned_rows: {raw_vs_cleaned['cleaned_rows']}",
+                f"- dropped_rows: {raw_vs_cleaned['dropped_rows']}",
+                f"- kept_fraction: {self._format_numeric(raw_vs_cleaned['kept_fraction'])}",
+            ])
+        else:
+            lines.append(f"- {self._describe_absence(raw_vs_cleaned)}")
+
+        lines.extend([
+            "",
+            "## Дубликаты",
+        ])
+        duplicate_summary = summary["duplicate_summary"]
+        if duplicate_summary["available"]:
+            lines.append(f"- duplicate_rows: {duplicate_summary['duplicate_rows']}")
+        else:
+            lines.append(f"- {self._describe_absence(duplicate_summary)}")
+
+        lines.extend([
+            "",
+            "## Распределение source",
+        ])
 
         source_distribution = summary["source_distribution"]
         if source_distribution["available"]:
@@ -136,6 +173,16 @@ class ReportingService:
 
         lines.extend([
             "",
+            "## Распределение rating",
+        ])
+        rating_distribution = summary["rating_distribution"]
+        if rating_distribution["available"]:
+            lines.append(f"- {self._format_count_map(rating_distribution['counts'])}")
+        else:
+            lines.append(f"- {self._describe_absence(rating_distribution)}")
+
+        lines.extend([
+            "",
             "## Длина text",
         ])
         text_length_summary = summary["text_length_summary"]
@@ -149,6 +196,16 @@ class ReportingService:
             ])
         else:
             lines.append(f"- {self._describe_absence(text_length_summary)}")
+
+        lines.extend([
+            "",
+            "## Бакеты длины text",
+        ])
+        text_length_buckets = summary["text_length_buckets"]
+        if text_length_buckets["available"]:
+            lines.append(f"- {self._format_count_map(text_length_buckets['counts'])}")
+        else:
+            lines.append(f"- {self._describe_absence(text_length_buckets)}")
 
         lines.extend([
             "",
@@ -166,8 +223,14 @@ class ReportingService:
         else:
             lines.append("- Ключевые колонки не найдены.")
 
+        quality_warnings = summary["quality_warnings"]
+        if quality_warnings:
+            lines.extend(["", "## Quality notes"])
+            for warning in quality_warnings:
+                lines.append(f"- {warning}")
+
         if summary["notes"]:
-            lines.extend(["", "## Примечания"])
+            lines.extend(["", "## Гипотезы и примечания"])
             for note in summary["notes"]:
                 lines.append(f"- {note}")
 
@@ -175,12 +238,112 @@ class ReportingService:
         self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
         return str(path)
 
-    def write_eda_context(self, df_like: Any) -> str:
+    def write_eda_context(
+        self,
+        df_like: Any,
+        *,
+        raw_df_like: Any | None = None,
+        quality_report: Any | None = None,
+    ) -> str:
         """Write the machine-readable helper artifact for the EDA pack."""
 
-        summary = self._build_eda_summary(df_like)
+        summary = self._build_extended_eda_summary(
+            df_like,
+            raw_df_like=raw_df_like,
+            quality_report=quality_report,
+        )
         path = Path("data/interim/eda_context.json")
         self.registry.save_json(path, summary)
+        return str(path)
+
+    def write_eda_html_report(
+        self,
+        df_like: Any,
+        *,
+        raw_df_like: Any | None = None,
+        quality_report: Any | None = None,
+    ) -> str:
+        """Write a self-contained offline HTML EDA report."""
+
+        summary = self._build_extended_eda_summary(
+            df_like,
+            raw_df_like=raw_df_like,
+            quality_report=quality_report,
+        )
+        cards = [
+            ("Rows", str(summary["n_rows"])),
+            ("Columns", str(summary["column_count"])),
+            ("Duplicate rows", str(summary["duplicate_summary"].get("duplicate_rows", 0))),
+            ("Warnings", str(len(summary["quality_warnings"]))),
+        ]
+        cards_html = "".join(
+            f'<div class="card"><div class="label">{self._escape_html(label)}</div><div class="value">{self._escape_html(value)}</div></div>'
+            for label, value in cards
+        )
+        sections = [
+            self._html_metric_block("Columns", self._escape_html(", ".join(summary["columns"]) or "нет")),
+            self._html_metric_block("Raw vs cleaned", self._format_raw_vs_cleaned(summary["raw_vs_cleaned"])),
+            self._html_metric_block("Source distribution", self._format_distribution_html(summary["source_distribution"])),
+            self._html_metric_block("Effect label distribution", self._format_distribution_html(summary["effect_label_distribution"])),
+            self._html_metric_block("Rating summary", self._format_summary_dict_html(summary["rating_summary"])),
+            self._html_metric_block("Rating distribution", self._format_distribution_html(summary["rating_distribution"])),
+            self._html_metric_block("Text length summary", self._format_summary_dict_html(summary["text_length_summary"])),
+            self._html_metric_block("Text length buckets", self._format_distribution_html(summary["text_length_buckets"])),
+            self._html_metric_block("Missing values", self._format_missing_values_html(summary["missing_values_summary"])),
+        ]
+        if summary["quality_warnings"]:
+            sections.append(
+                self._html_metric_block(
+                    "Quality notes",
+                    "<ul>" + "".join(f"<li>{self._escape_html(note)}</li>" for note in summary["quality_warnings"]) + "</ul>",
+                )
+            )
+        if summary["notes"]:
+            sections.append(
+                self._html_metric_block(
+                    "Hypotheses",
+                    "<ul>" + "".join(f"<li>{self._escape_html(note)}</li>" for note in summary["notes"]) + "</ul>",
+                )
+            )
+
+        html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>EDA Report</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; background: #f4f1ea; color: #1f2933; margin: 0; padding: 32px; }}
+    .wrap {{ max-width: 1200px; margin: 0 auto; }}
+    .intro {{ max-width: 860px; line-height: 1.6; }}
+    .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 24px 0; }}
+    .card {{ background: #fffaf5; border: 1px solid #d9c8b4; border-radius: 16px; padding: 18px; box-shadow: 0 10px 24px rgba(31, 41, 51, 0.06); }}
+    .label {{ font-size: 13px; color: #7a5c3e; text-transform: uppercase; letter-spacing: 0.04em; }}
+    .value {{ font-size: 30px; font-weight: 700; margin-top: 8px; }}
+    .section-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }}
+    .section {{ background: white; border-radius: 18px; padding: 20px; border: 1px solid #eadfce; }}
+    .section h3 {{ margin: 0 0 12px 0; }}
+    .plot {{ margin-top: 28px; background: white; border-radius: 18px; padding: 20px; border: 1px solid #eadfce; }}
+    ul {{ margin: 0; padding-left: 20px; }}
+    table {{ width: 100%; border-collapse: collapse; }}
+    td, th {{ text-align: left; padding: 6px 0; vertical-align: top; }}
+    .muted {{ color: #6b7280; }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>EDA Report</h1>
+    <p class="intro">Offline-friendly HTML-отчёт по данным после quality stage. Он показывает структуру датасета, сравнение raw/cleaned, пропуски, распределения и краткие аналитические выводы.</p>
+    <div class="cards">{cards_html}</div>
+    <div class="section-grid">{''.join(sections)}</div>
+    <div class="plot">
+      <h2>Charts</h2>
+      {self._build_eda_plotly_html(summary)}
+    </div>
+  </div>
+</body>
+</html>"""
+        path = Path("reports/eda_report.html")
+        self.registry.save_text(path, html)
         return str(path)
 
     def write_annotation_report(self, df_labeled: Any, annotation_summary: dict[str, Any] | None = None) -> str:
@@ -583,6 +746,171 @@ class ReportingService:
             "notes": notes,
         }
 
+    def _build_extended_eda_summary(
+        self,
+        df_like: Any,
+        *,
+        raw_df_like: Any | None = None,
+        quality_report: Any | None = None,
+    ) -> dict[str, Any]:
+        """Build a richer EDA payload for markdown, HTML, and helper artifacts."""
+
+        summary = self._build_eda_summary(df_like)
+        rows = self._to_records(df_like)
+        columns = summary.get("columns", []) or self._collect_input_columns(df_like)
+        raw_rows = self._to_records(raw_df_like) if raw_df_like is not None else []
+
+        summary["column_count"] = len(columns)
+        summary["duplicate_summary"] = self._build_duplicate_summary(rows, columns)
+        summary["raw_vs_cleaned"] = self._build_raw_vs_cleaned_summary(raw_rows, rows)
+        summary["rating_distribution"] = self._build_rating_distribution(rows, "rating", columns)
+        summary["text_length_buckets"] = self._build_text_length_buckets(rows, "text", columns)
+        summary["quality_warnings"] = self._extract_quality_warnings(quality_report)
+
+        notes = list(summary.get("notes", []))
+        if summary["duplicate_summary"].get("available") and summary["duplicate_summary"].get("duplicate_rows", 0) > 0:
+            notes.append("В cleaned датасете ещё есть повторяющиеся строки, это стоит проверить перед финальным обучением.")
+
+        raw_vs_cleaned = summary["raw_vs_cleaned"]
+        if raw_vs_cleaned.get("available") and raw_vs_cleaned.get("dropped_rows", 0) > 0:
+            notes.append(
+                "После quality stage часть строк была удалена или отфильтрована. Это полезно сравнить с логикой чистки и approval flow."
+            )
+
+        rating_distribution = summary["rating_distribution"]
+        if rating_distribution.get("available") and len(rating_distribution.get("counts", {})) <= 2:
+            notes.append("Распределение rating выглядит узким. Для анализа выбросов и дисбаланса стоит смотреть не только на среднее.")
+
+        summary["notes"] = notes
+        return summary
+
+    def _build_duplicate_summary(
+        self,
+        rows: list[dict[str, Any]],
+        available_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Estimate duplicate rows directly from the cleaned dataframe-like input."""
+
+        columns = available_columns if available_columns is not None else self._collect_columns(rows)
+        if not columns:
+            return {"available": False, "reason": "column_absent"}
+
+        if not rows:
+            return {"available": False, "reason": "no_values"}
+
+        seen: set[str] = set()
+        duplicate_rows = 0
+        for row in rows:
+            fingerprint = repr({column: row.get(column) for column in columns})
+            if fingerprint in seen:
+                duplicate_rows += 1
+                continue
+            seen.add(fingerprint)
+
+        return {"available": True, "duplicate_rows": duplicate_rows}
+
+    def _build_raw_vs_cleaned_summary(
+        self,
+        raw_rows: list[dict[str, Any]],
+        cleaned_rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Compare raw and cleaned row counts when the raw frame is available."""
+
+        if not raw_rows:
+            return {"available": False, "reason": "no_values"}
+
+        raw_count = len(raw_rows)
+        cleaned_count = len(cleaned_rows)
+        return {
+            "available": True,
+            "raw_rows": raw_count,
+            "cleaned_rows": cleaned_count,
+            "dropped_rows": max(0, raw_count - cleaned_count),
+            "kept_fraction": (cleaned_count / raw_count) if raw_count else 0.0,
+        }
+
+    def _build_rating_distribution(
+        self,
+        rows: list[dict[str, Any]],
+        column_name: str,
+        available_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Build a compact distribution for rating values."""
+
+        columns = available_columns if available_columns is not None else self._collect_columns(rows)
+        if column_name not in columns:
+            return {"available": False, "reason": "column_absent"}
+
+        counts: dict[str, int] = {}
+        for row in rows:
+            value = row.get(column_name)
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                continue
+            if numeric_value != numeric_value:
+                continue
+
+            bucket = self._format_numeric(numeric_value)
+            counts[bucket] = counts.get(bucket, 0) + 1
+
+        if not counts:
+            return {"available": False, "reason": "no_numeric_values"}
+
+        return {"available": True, "counts": counts}
+
+    def _build_text_length_buckets(
+        self,
+        rows: list[dict[str, Any]],
+        column_name: str,
+        available_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Build coarse text-length buckets for a quick EDA view."""
+
+        columns = available_columns if available_columns is not None else self._collect_columns(rows)
+        if column_name not in columns:
+            return {"available": False, "reason": "column_absent"}
+
+        counts = {"0-49": 0, "50-99": 0, "100-199": 0, "200+": 0}
+        has_values = False
+        for row in rows:
+            value = row.get(column_name)
+            if self._is_missing_value(value):
+                continue
+            length = len(self._normalize_text(value))
+            has_values = True
+            if length < 50:
+                counts["0-49"] += 1
+            elif length < 100:
+                counts["50-99"] += 1
+            elif length < 200:
+                counts["100-199"] += 1
+            else:
+                counts["200+"] += 1
+
+        if not has_values:
+            return {"available": False, "reason": "no_text_values"}
+
+        return {"available": True, "counts": counts}
+
+    def _extract_quality_warnings(self, quality_report: Any) -> list[str]:
+        """Extract warning text from the optional quality-report payload."""
+
+        if quality_report is None:
+            return []
+
+        if hasattr(quality_report, "as_dict"):
+            payload = quality_report.as_dict()
+        elif isinstance(quality_report, dict):
+            payload = quality_report
+        else:
+            return []
+
+        warnings = payload.get("warnings", [])
+        if not isinstance(warnings, list):
+            return []
+        return [self._normalize_text(item) for item in warnings if self._normalize_text(item)]
+
     def _collect_columns(self, rows: list[dict[str, Any]]) -> list[str]:
         """Collect columns in first-seen order from row dictionaries."""
 
@@ -775,6 +1103,128 @@ class ReportingService:
         if reason == "no_text_values":
             return "текстовые значения не найдены"
         return f"недоступно: {reason}"
+
+    def _html_metric_block(self, title: str, body: str) -> str:
+        """Render one HTML metric section for the EDA dashboard."""
+
+        return f'<section class="section"><h3>{self._escape_html(title)}</h3>{body}</section>'
+
+    def _escape_html(self, value: Any) -> str:
+        """Escape text for safe inline HTML rendering."""
+
+        text = self._normalize_text(value)
+        return (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )
+
+    def _format_distribution_html(self, payload: dict[str, Any]) -> str:
+        """Render a small HTML table or an absence description for distributions."""
+
+        if not payload.get("available"):
+            return f'<p class="muted">{self._escape_html(self._describe_absence(payload))}</p>'
+
+        counts = payload.get("counts", {})
+        rows = "".join(
+            f"<tr><td>{self._escape_html(key)}</td><td>{self._escape_html(value)}</td></tr>"
+            for key, value in counts.items()
+        )
+        return f"<table><tbody>{rows}</tbody></table>"
+
+    def _format_summary_dict_html(self, payload: dict[str, Any]) -> str:
+        """Render a compact HTML view for summary dictionaries."""
+
+        if not payload.get("available"):
+            return f'<p class="muted">{self._escape_html(self._describe_absence(payload))}</p>'
+
+        rows = "".join(
+            f"<tr><td>{self._escape_html(key)}</td><td>{self._escape_html(self._format_numeric(value) if isinstance(value, (int, float)) else value)}</td></tr>"
+            for key, value in payload.items()
+            if key not in {"available", "column"}
+        )
+        return f"<table><tbody>{rows}</tbody></table>"
+
+    def _format_missing_values_html(self, payload: dict[str, Any]) -> str:
+        """Render missing-value summaries for the HTML report."""
+
+        if not payload:
+            return '<p class="muted">Нет данных.</p>'
+
+        rows: list[str] = []
+        for column_name, column_summary in payload.items():
+            if column_summary.get("available"):
+                rows.append(
+                    f"<tr><td>{self._escape_html(column_name)}</td><td>{self._escape_html(column_summary.get('missing_count'))}</td><td>{self._escape_html(self._format_numeric(column_summary.get('missing_fraction')))}</td></tr>"
+                )
+            else:
+                rows.append(
+                    f"<tr><td>{self._escape_html(column_name)}</td><td colspan=\"2\">{self._escape_html(self._describe_absence(column_summary))}</td></tr>"
+                )
+
+        return "<table><thead><tr><th>Column</th><th>Missing</th><th>Fraction</th></tr></thead><tbody>{rows}</tbody></table>".format(
+            rows="".join(rows)
+        )
+
+    def _format_raw_vs_cleaned(self, payload: dict[str, Any]) -> str:
+        """Render raw-vs-cleaned comparison for the HTML report."""
+
+        if not payload.get("available"):
+            return f'<p class="muted">{self._escape_html(self._describe_absence(payload))}</p>'
+
+        rows = "".join(
+            f"<tr><td>{self._escape_html(key)}</td><td>{self._escape_html(self._format_numeric(value) if isinstance(value, (int, float)) else value)}</td></tr>"
+            for key, value in payload.items()
+            if key != "available"
+        )
+        return f"<table><tbody>{rows}</tbody></table>"
+
+    def _build_eda_plotly_html(self, summary: dict[str, Any]) -> str:
+        """Render inline Plotly charts when available, otherwise fall back to static HTML."""
+
+        try:
+            import plotly.graph_objects as go  # type: ignore[import-not-found]
+        except Exception:
+            return "<p class=\"muted\">Plotly не установлен, поэтому HTML-отчет показывает summary без интерактивных графиков.</p>"
+
+        figures: list[str] = []
+        chart_specs = [
+            ("Source distribution", summary.get("source_distribution", {})),
+            ("Effect label distribution", summary.get("effect_label_distribution", {})),
+            ("Rating distribution", summary.get("rating_distribution", {})),
+            ("Text length buckets", summary.get("text_length_buckets", {})),
+        ]
+
+        for index, (title, payload) in enumerate(chart_specs):
+            if not payload.get("available"):
+                continue
+            counts = payload.get("counts", {})
+            figure = go.Figure(
+                data=[
+                    go.Bar(
+                        x=list(counts.keys()),
+                        y=list(counts.values()),
+                        marker_color="#b7791f",
+                    )
+                ]
+            )
+            figure.update_layout(
+                title=title,
+                template="plotly_white",
+                margin=dict(l=24, r=24, t=56, b=24),
+                height=360,
+            )
+            figures.append(
+                figure.to_html(
+                    full_html=False,
+                    include_plotlyjs="inline" if index == 0 else False,
+                )
+            )
+
+        if not figures:
+            return "<p class=\"muted\">Для текущего датасета недостаточно значений, чтобы построить графики.</p>"
+        return "".join(figures)
 
     def _candidate_to_approval_record(self, candidate: Any) -> dict[str, Any]:
         """Convert a shortlist candidate into a stable helper artifact row.

@@ -48,6 +48,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert "## EDA" in final_report
     assert "## Annotation" in final_report
     assert "eda_report_path" in final_report
+    assert "eda_html_report_path" in final_report
     assert "eda_context_path" in final_report
     assert "annotation_trace_report_path" in final_report
     assert "annotation_trace_context_path" in final_report
@@ -73,17 +74,28 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert annotation_trace_context["llm_mode"] == "classify_effect"
     assert annotation_trace_context["n_rows"] >= 0
     eda_report = (tmp_path / "reports" / "eda_report.md").read_text(encoding="utf-8")
+    eda_html_report = (tmp_path / "reports" / "eda_report.html").read_text(encoding="utf-8")
     assert "EDA-пакет" in eda_report
-    assert "Это краткий честный EDA-отчет" in eda_report
+    assert "Это расширенный честный EDA-отчет" in eda_report
+    assert "Raw vs cleaned" in eda_report
+    assert "Дубликаты" in eda_report
     assert "source distribution" not in eda_report.lower()
+    assert "<html" in eda_html_report.lower()
+    assert "EDA Report" in eda_html_report
     eda_context = json.loads((tmp_path / "data" / "interim" / "eda_context.json").read_text(encoding="utf-8"))
     assert "n_rows" in eda_context
+    assert "column_count" in eda_context
     assert "columns" in eda_context
+    assert "raw_vs_cleaned" in eda_context
+    assert "duplicate_summary" in eda_context
     assert "source_distribution" in eda_context
     assert "effect_label_distribution" in eda_context
     assert "rating_summary" in eda_context
+    assert "rating_distribution" in eda_context
     assert "text_length_summary" in eda_context
+    assert "text_length_buckets" in eda_context
     assert "missing_values_summary" in eda_context
+    assert "quality_warnings" in eda_context
     source_report = (tmp_path / "reports" / "source_report.md").read_text(encoding="utf-8")
     assert "Короткий shortlist источников" in source_report
     assert "ручного просмотра и одобрения" in source_report
@@ -231,19 +243,27 @@ def test_eda_pack_handles_empty_quality_output(monkeypatch, tmp_path: Path) -> N
     assert (tmp_path / "reports" / "annotation_trace_report.md").exists()
     assert (tmp_path / "data" / "interim" / "annotation_trace.json").exists()
     assert eda_context["n_rows"] == 0
+    assert eda_context["column_count"] == 4
     assert eda_context["columns"] == ["id", "source", "text", "rating"]
+    assert eda_context["raw_vs_cleaned"]["available"] is False
+    assert eda_context["duplicate_summary"]["available"] is False
     assert eda_context["source_distribution"]["available"] is False
     assert eda_context["source_distribution"]["reason"] == "no_values"
     assert eda_context["effect_label_distribution"]["available"] is False
     assert eda_context["effect_label_distribution"]["reason"] == "column_absent"
     assert eda_context["rating_summary"]["available"] is False
     assert eda_context["rating_summary"]["reason"] == "no_numeric_values"
+    assert eda_context["rating_distribution"]["available"] is False
+    assert eda_context["rating_distribution"]["reason"] == "no_numeric_values"
     assert eda_context["text_length_summary"]["available"] is False
     assert eda_context["text_length_summary"]["reason"] == "no_text_values"
+    assert eda_context["text_length_buckets"]["available"] is False
+    assert eda_context["text_length_buckets"]["reason"] == "no_text_values"
     assert eda_context["missing_values_summary"]["source"]["available"] is True
     assert eda_context["missing_values_summary"]["source"]["missing_count"] == 0
     assert eda_context["missing_values_summary"]["source"]["missing_fraction"] == 0.0
     assert "eda_report_path" in final_report
+    assert "eda_html_report_path" in final_report
     assert "eda_context_path" in final_report
 
 

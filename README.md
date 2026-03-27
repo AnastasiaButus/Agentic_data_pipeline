@@ -247,6 +247,7 @@ LLM используется только там, где он действите
 - `reports/source_report.md`
 - `reports/quality_report.md`
 - `reports/eda_report.md`
+- `reports/eda_report.html`
 - `data/interim/eda_context.json`
 - `reports/annotation_report.md`
 - `reports/annotation_trace_report.md`
@@ -387,3 +388,4 @@ python run_pipeline.py --config configs/your_gemini_config.yaml
 Именно поэтому архитектурная ставка в проекте сейчас такая:
 
 **надёжный offline-first baseline + понятный agentic pipeline + видимый HITL + явная ML-модель + аккуратный online extension.**
+

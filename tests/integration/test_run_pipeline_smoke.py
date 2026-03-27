@@ -785,6 +785,115 @@ def test_run_pipeline_smoke_reports_applied_empty_subset(monkeypatch, tmp_path: 
     assert (tmp_path / "reports" / "review_merge_report.md").exists()
 
 
+def test_approval_flow_passes_empty_sources_when_no_match_and_reports_applied_empty_subset(monkeypatch, tmp_path: Path) -> None:
+    """When approved_sources.json doesn't match any discovered source, collection must receive empty sources list."""
+
+    import pandas as pd
+
+    from src.domain import SourceCandidate
+    from src.services import source_discovery_service as discovery_module
+    from src.agents import data_collection_agent as data_collection_module
+
+    repo_root = Path(__file__).resolve().parents[2]
+    template_path = repo_root / "configs" / "demo_fitness.yaml"
+    template_text = template_path.read_text(encoding="utf-8")
+
+    config_path = tmp_path / "demo_fitness.runtime.yaml"
+    config_path.write_text(
+        template_text.replace("root_dir: .", f"root_dir: {tmp_path.as_posix()}"),
+        encoding="utf-8",
+    )
+
+    loaded_config = load_config(config_path)
+
+    (tmp_path / "data" / "raw").mkdir(parents=True, exist_ok=True)
+    # approved_sources.json contains a source_id that doesn't exist in discovered sources
+    (tmp_path / "data" / "raw" / "approved_sources.json").write_text('["nonexistent_approved_source_id"]', encoding="utf-8")
+
+    captured_sources: dict[str, list[object]] = {}
+    captured_report: dict[str, object] = {}
+
+    # Discovery returns one source that doesn't match the approved_sources.json
+    monkeypatch.setattr(
+        discovery_module.SourceDiscoveryService,
+        "run",
+        lambda self: [
+            SourceCandidate(
+                "discovered_but_not_approved",
+                "hf_dataset",
+                "Discovered Source",
+                "discovered_but_not_approved",
+                score=5.0,
+                metadata={"web_url": "https://example.com/source"},
+            )
+        ],
+    )
+
+    def fake_collect(self, sources):
+        # Capture the sources that were passed to collection
+        captured_sources["sources"] = list(sources)
+        return pd.DataFrame(
+            [
+                {
+                    "id": "1",
+                    "source": "demo",
+                    "text": "Great product",
+                    "label": None,
+                    "rating": 5,
+                    "created_at": "now",
+                    "split": None,
+                    "meta_json": "{}",
+                    "sentiment_label": None,
+                    "effect_label": "energy",
+                    "confidence": 1.0,
+                }
+            ]
+        )
+
+    monkeypatch.setattr(data_collection_module.DataCollectionAgent, "run", fake_collect)
+
+    from src.services import training_service as training_module
+
+    monkeypatch.setattr(
+        training_module.TrainingService,
+        "train",
+        lambda self, df: (
+            {
+                "model_path": str(tmp_path / "model.pkl"),
+                "vectorizer_path": str(tmp_path / "vectorizer.pkl"),
+                "metrics_path": str(tmp_path / "metrics.json"),
+            },
+            {"accuracy": 1.0, "f1": 1.0},
+        ),
+    )
+
+    from src.services import reporting_service as reporting_module
+
+    original_write_final_report = reporting_module.ReportingService.write_final_report
+
+    def capture_final_report(self, summary):
+        captured_report["summary"] = summary
+        return original_write_final_report(self, summary)
+
+    monkeypatch.setattr(reporting_module.ReportingService, "write_final_report", capture_final_report)
+
+    from run_pipeline import main
+
+    exit_code = main(["--config", str(config_path)])
+
+    assert exit_code == 0
+    # Verify that collection received an empty sources list
+    assert len(captured_sources["sources"]) == 0
+    assert [source.source_id for source in captured_sources["sources"]] == []
+    # Verify approval_status is applied_empty_subset
+    assert captured_report["summary"]["approval"]["approval_status"] == "applied_empty_subset"
+    assert captured_report["summary"]["approval"]["n_approved_sources"] == 0
+    # Verify final report reflects the honest status
+    final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
+    assert "approval_status: applied_empty_subset" in final_report
+    assert "## Approval" in final_report
+
+
 def test_review_pack_aligns_with_annotation_summary_and_vocabulary(monkeypatch, tmp_path: Path) -> None:
     """Review pack should follow AnnotationAgent summary threshold and vocabulary semantics."""
 

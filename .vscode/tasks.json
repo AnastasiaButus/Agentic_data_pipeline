@@ -10,7 +10,8 @@
         "pytest",
         "tests\\unit",
         "-q",
-        "--basetemp=.pytest_tmp\\unit"
+        "-p",
+        "no:cacheprovider"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -27,7 +28,8 @@
         "pytest",
         "tests\\integration\\test_run_pipeline_smoke.py",
         "-q",
-        "--basetemp=.pytest_tmp\\integration"
+        "-p",
+        "no:cacheprovider"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

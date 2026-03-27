@@ -268,6 +268,12 @@ def test_collection_topic_filter_is_safe_for_non_fitness_domains(tmp_path: Path)
 
     registry = FakeRegistry()
     normalizer = StubNormalizer()
+    html = (
+        "<html><body>"
+        '<div class="review" data-text="Minecraft crafting guide for redstone tools" data-rating="5">Crafting</div>'
+        '<div class="review" data-text="Minecraft combat warning for potion fights" data-rating="2">Combat</div>'
+        "</body></html>"
+    )
     agent = DataCollectionAgent(
         _make_minecraft_context(tmp_path),
         hf_loader=StubHFLoader(),
@@ -281,8 +287,11 @@ def test_collection_topic_filter_is_safe_for_non_fitness_domains(tmp_path: Path)
         ),
     )
 
-    result = agent.run([SourceCandidate("scrape-1", "scrape", "Minecraft", "demo://minecraft")])
+    result = agent.run(
+        [SourceCandidate("scrape-1", "scrape", "Minecraft", "demo://minecraft", metadata={"html": html})]
+    )
     filtered_rows = normalizer.calls[0].to_dict(orient="records")
 
     assert not result.empty
     assert len(filtered_rows) == 2
+

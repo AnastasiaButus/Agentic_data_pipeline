@@ -9,7 +9,7 @@ from urllib.error import URLError
 import pytest
 
 from src.agents.annotation_agent import AnnotationAgent
-from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, SourceConfig
+from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, RequestConfig, SourceConfig
 from src.core.context import PipelineContext
 from src.providers.llm.gemini_client import GeminiClient
 from src.providers.llm.mock_llm import MockLLM
@@ -50,6 +50,7 @@ def _make_context(tmp_path: Path) -> PipelineContext:
         project=ProjectConfig(name="gemini-demo", root_dir=tmp_path),
         source=SourceConfig(use_huggingface=True),
         annotation=AnnotationConfig(confidence_threshold=0.6, use_llm=True),
+        request=RequestConfig(topic="fitness supplements", domain="supplements", modality="text"),
     )
     return PipelineContext.from_config(config)
 

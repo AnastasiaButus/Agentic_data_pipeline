@@ -32,6 +32,7 @@ source:
 
 annotation:
   use_llm: true
+  llm_provider: mock
   confidence_threshold: 0.6
   effect_labels:
     - crafting

@@ -5,11 +5,26 @@ from __future__ import annotations
 from typing import Any
 
 
-def filter_fitness_reviews(df: Any) -> Any:
-    """Apply a soft fitness-related filter when descriptive columns are present."""
+def filter_topic_rows(
+    df: Any,
+    *,
+    topic: str = "",
+    domain: str = "",
+    extra_keywords: list[str] | None = None,
+) -> Any:
+    """Apply a soft topic-aware filter when descriptive columns are present.
+
+    The filter is intentionally conservative: if no rows match the inferred topic keywords,
+    the original rows are returned unchanged so discovery/collection does not silently
+    discard a usable dataset.
+    """
 
     rows = _to_records(df)
     if not rows:
+        return _build_like(df, rows)
+
+    keywords = _build_topic_keywords(topic=topic, domain=domain, extra_keywords=extra_keywords)
+    if not keywords:
         return _build_like(df, rows)
 
     candidate_rows = []
@@ -20,10 +35,63 @@ def filter_fitness_reviews(df: Any) -> Any:
         if not text_blob:
             candidate_rows.append(row)
             continue
-        if any(keyword in text_blob for keyword in ("fitness", "supplement", "protein", "review")):
+        if any(keyword in text_blob for keyword in keywords):
             candidate_rows.append(row)
 
     return _build_like(df, candidate_rows or rows)
+
+
+def filter_fitness_reviews(df: Any) -> Any:
+    """Backward-compatible alias for the former fitness-specific helper."""
+
+    return filter_topic_rows(df, topic="fitness supplements", domain="supplements")
+
+
+def _build_topic_keywords(
+    *,
+    topic: str = "",
+    domain: str = "",
+    extra_keywords: list[str] | None = None,
+) -> list[str]:
+    """Extract stable, low-risk keywords from topic metadata for soft filtering."""
+
+    raw_parts = [topic, domain, *(extra_keywords or [])]
+    stopwords = {
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "into",
+        "review",
+        "reviews",
+        "dataset",
+        "datasets",
+        "classification",
+        "instructions",
+        "instruction",
+        "text",
+        "texts",
+        "data",
+    }
+
+    keywords: list[str] = []
+    for part in raw_parts:
+        normalized = str(part or "").strip().lower().replace("-", " ").replace("_", " ")
+        if not normalized:
+            continue
+        for token in normalized.split():
+            cleaned = "".join(char for char in token if char.isalnum())
+            if len(cleaned) < 4 or cleaned in stopwords:
+                continue
+            if cleaned not in keywords:
+                keywords.append(cleaned)
+            if cleaned.endswith("s") and len(cleaned) > 4:
+                singular = cleaned[:-1]
+                if singular not in stopwords and singular not in keywords:
+                    keywords.append(singular)
+
+    return keywords
 
 
 def _to_records(df: Any) -> list[dict[str, Any]]:

@@ -128,9 +128,11 @@ class AnnotationAgent(BaseAgent):
             labels = list(EFFECT_LABELS)
 
         text_value = self._normalize_optional_text(text) or "<empty>"
+        topic_description = self._annotation_topic_description()
+        modality_name = self._annotation_modality_name()
         return "\n".join(
             [
-                "Ты разметчик отзывов о пищевых добавках.",
+                f"Ты разметчик {modality_name} данных по теме: {topic_description}.",
                 "Верни только JSON без пояснений, markdown и лишнего текста.",
                 "",
                 "Заполни ровно эти поля:",
@@ -148,7 +150,7 @@ class AnnotationAgent(BaseAgent):
                 "Ожидаемый ответ:",
                 '{"effect_label": "...", "sentiment_label": "...", "confidence": 0.0}',
                 "",
-                "Текст отзыва:",
+                "Текст для разметки:",
                 text_value,
             ]
         )
@@ -634,11 +636,37 @@ class AnnotationAgent(BaseAgent):
         return numeric
 
     def _effect_label_vocabulary(self) -> list[str]:
-        """Resolve the active effect-label vocabulary from config with a safe fitness fallback."""
+        """Resolve the active effect-label vocabulary from config with a safe default fallback."""
 
         annotation = getattr(getattr(self.ctx, "config", None), "annotation", None)
         effect_labels = list(getattr(annotation, "effect_labels", []) or []) if annotation is not None else []
         return [str(label).strip() for label in effect_labels if str(label).strip()] or list(EFFECT_LABELS)
+
+    def _annotation_topic_description(self) -> str:
+        """Return a short, human-readable topic string for prompt generation."""
+
+        request = getattr(getattr(self.ctx, "config", None), "request", None)
+        topic = self._normalize_optional_text(getattr(request, "topic", ""))
+        domain = self._normalize_optional_text(getattr(request, "domain", ""))
+
+        if topic and domain and domain.lower() not in topic.lower():
+            return f"{topic} ({domain})"
+        if topic:
+            return topic
+        if domain:
+            return domain
+        return "текущий проект"
+
+    def _annotation_modality_name(self) -> str:
+        """Return the modality name used in prompt generation."""
+
+        request = getattr(getattr(self.ctx, "config", None), "request", None)
+        modality = self._normalize_optional_text(getattr(request, "modality", "")).lower()
+        if modality == "audio":
+            return "аудио"
+        if modality == "image":
+            return "визуальных"
+        return "текстовых"
 
     def _fallback_effect_label(self, effect_labels: list[str]) -> str:
         """Choose the safest fallback effect label for offline and error paths."""

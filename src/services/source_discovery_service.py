@@ -411,8 +411,8 @@ class SourceDiscoveryService:
 
         return (
             "<html><body>"
-            '<div class="review" data-text="Minecraft review: energy tip for long survival builds" data-rating="5">Helpful building guide</div>'
-            '<div class="review" data-text="Minecraft review: side effect warning from risky potion use" data-rating="1">Potion side effect note</div>'
-            '<div class="review" data-text="Minecraft review: crafting instructions for redstone tools" data-rating="3">Crafting instructions summary</div>'
+            '<div class="review" data-text="Minecraft guide: crafting instructions for redstone tools and starter builds" data-rating="5">Helpful crafting guide</div>'
+            '<div class="review" data-text="Minecraft guide: combat warning about potion timing in arena fights" data-rating="2">Combat warning note</div>'
+            '<div class="review" data-text="Minecraft guide: enchantments improve armor and tool progression" data-rating="4">Enchantments overview</div>'
             '</body></html>'
         )

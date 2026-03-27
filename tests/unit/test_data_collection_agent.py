@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.agents.data_collection_agent import DataCollectionAgent
-from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, SourceConfig
+from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, RequestConfig, SourceConfig
 from src.core.context import PipelineContext
 from src.domain import SourceCandidate
 
@@ -100,6 +100,19 @@ def _make_context(tmp_path: Path) -> PipelineContext:
         project=ProjectConfig(name="fitness-demo", root_dir=tmp_path),
         source=SourceConfig(use_huggingface=True),
         annotation=AnnotationConfig(),
+        request=RequestConfig(topic="fitness supplements", domain="supplements", modality="text"),
+    )
+    return PipelineContext.from_config(config)
+
+
+def _make_minecraft_context(tmp_path: Path) -> PipelineContext:
+    """Build a minimal minecraft-themed pipeline context for collection tests."""
+
+    config = AppConfig(
+        project=ProjectConfig(name="minecraft-demo", root_dir=tmp_path),
+        source=SourceConfig(use_huggingface=True),
+        annotation=AnnotationConfig(effect_labels=["crafting", "combat", "enchantments"]),
+        request=RequestConfig(topic="minecraft instructions", domain="minecraft", modality="text"),
     )
     return PipelineContext.from_config(config)
 
@@ -248,3 +261,28 @@ def test_data_collection_agent_is_compatible_with_base_agent(tmp_path: Path) -> 
     )
 
     assert agent.name == "DataCollectionAgent"
+
+
+def test_collection_topic_filter_is_safe_for_non_fitness_domains(tmp_path: Path) -> None:
+    """Topic-aware filtering should keep minecraft-like rows and avoid emptying the batch."""
+
+    registry = FakeRegistry()
+    normalizer = StubNormalizer()
+    agent = DataCollectionAgent(
+        _make_minecraft_context(tmp_path),
+        hf_loader=StubHFLoader(),
+        normalizer=normalizer,
+        registry=registry,
+        scraper=lambda _html: _Frame(
+            [
+                {"text": "Minecraft crafting guide for redstone tools", "rating": 5, "title": "Crafting"},
+                {"text": "Minecraft combat warning for potion fights", "rating": 2, "title": "Combat"},
+            ]
+        ),
+    )
+
+    result = agent.run([SourceCandidate("scrape-1", "scrape", "Minecraft", "demo://minecraft")])
+    filtered_rows = normalizer.calls[0].to_dict(orient="records")
+
+    assert not result.empty
+    assert len(filtered_rows) == 2

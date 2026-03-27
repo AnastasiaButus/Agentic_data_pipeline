@@ -13,7 +13,7 @@ from src.domain import SourceCandidate
 from src.providers.datasets.hf_loader import HFDatasetLoader
 from src.providers.web.scraper import parse_review_blocks
 from src.services.artifact_registry import ArtifactRegistry
-from src.services.dataset_filter_service import filter_fitness_reviews
+from src.services.dataset_filter_service import filter_topic_rows
 from src.services.schema_normalization_service import SchemaNormalizationService
 
 
@@ -49,7 +49,11 @@ class DataCollectionAgent(BaseAgent):
             raw_frame = self._collect_source(source)
             if self._is_empty(raw_frame):
                 continue
-            filtered_frame = filter_fitness_reviews(raw_frame)
+            filtered_frame = filter_topic_rows(
+                raw_frame,
+                topic=self._request_topic(),
+                domain=self._request_domain(),
+            )
             raw_frames.append(filtered_frame)
 
             normalized_frame = self.normalizer.normalize_reviews(
@@ -132,6 +136,18 @@ class DataCollectionAgent(BaseAgent):
         if source.source_id:
             return source.source_id
         return source.uri
+
+    def _request_topic(self) -> str:
+        """Return the active request topic for soft collection-time filtering."""
+
+        request = getattr(getattr(self.ctx, "config", None), "request", None)
+        return str(getattr(request, "topic", "") or "").strip()
+
+    def _request_domain(self) -> str:
+        """Return the active request domain for soft collection-time filtering."""
+
+        request = getattr(getattr(self.ctx, "config", None), "request", None)
+        return str(getattr(request, "domain", "") or "").strip()
 
     def _to_records(self, frame: Any) -> list[dict[str, Any]]:
         """Materialize a frame-like object into row dictionaries."""

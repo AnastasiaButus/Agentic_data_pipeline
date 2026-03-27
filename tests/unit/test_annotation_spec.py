@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.agents.annotation_agent import AnnotationAgent
-from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, SourceConfig
+from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, RequestConfig, SourceConfig
 from src.core.context import PipelineContext
 
 
@@ -45,6 +45,7 @@ def _make_context(tmp_path: Path) -> PipelineContext:
         project=ProjectConfig(name="fitness-demo", root_dir=tmp_path),
         source=SourceConfig(use_huggingface=True),
         annotation=AnnotationConfig(),
+        request=RequestConfig(topic="fitness supplements", domain="supplements", modality="text"),
     )
     return PipelineContext.from_config(config)
 
@@ -56,6 +57,7 @@ def _make_context_with_effect_labels(tmp_path: Path, effect_labels: list[str]) -
         project=ProjectConfig(name="minecraft-demo", root_dir=tmp_path),
         source=SourceConfig(use_huggingface=True),
         annotation=AnnotationConfig(effect_labels=effect_labels),
+        request=RequestConfig(topic="minecraft instructions", domain="minecraft", modality="text"),
     )
     return PipelineContext.from_config(config)
 

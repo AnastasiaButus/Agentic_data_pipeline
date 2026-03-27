@@ -16,6 +16,12 @@ class MockLLM(BaseLLM):
         """Generate a deterministic label-like response from the prompt."""
 
         text = prompt.lower()
+        if "crafting" in text or "redstone" in text or "recipe" in text:
+            return "crafting"
+        if "combat" in text or "fight" in text or "battle" in text or "potion" in text:
+            return "combat"
+        if "enchant" in text or "enchanted" in text or "enchantment" in text:
+            return "enchantments"
         if "side effect" in text:
             return "side_effects"
         if "energy" in text:
@@ -33,9 +39,9 @@ class MockLLM(BaseLLM):
 
         if {"crafting", "combat", "enchantments"} & normalized_labels:
             keyword_routes = [
-                (("enchant", "enchantment", "enchanted", "energy", "survival"), "enchantments"),
-                (("combat", "fight", "battle", "arena", "potion", "warning"), "combat"),
-                (("craft", "crafting", "redstone", "build"), "crafting"),
+                (("enchant", "enchantment", "enchanted", "bookshelf", "anvil"), "enchantments"),
+                (("combat", "fight", "battle", "arena", "potion", "warning", "attack"), "combat"),
+                (("craft", "crafting", "redstone", "build", "recipe"), "crafting"),
             ]
         else:
             keyword_routes = [

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.agents.annotation_agent import AnnotationAgent
-from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, SourceConfig
+from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, RequestConfig, SourceConfig
 from src.core.context import PipelineContext
 from src.providers.llm.mock_llm import MockLLM
 
@@ -46,6 +46,7 @@ def _make_context(tmp_path: Path) -> PipelineContext:
         project=ProjectConfig(name="fitness-demo", root_dir=tmp_path),
         source=SourceConfig(use_huggingface=True),
         annotation=AnnotationConfig(confidence_threshold=0.6),
+        request=RequestConfig(topic="fitness supplements", domain="supplements", modality="text"),
     )
     return PipelineContext.from_config(config)
 
@@ -57,6 +58,7 @@ def _make_context_with_effect_labels(tmp_path: Path, effect_labels: list[str]) -
         project=ProjectConfig(name="minecraft-demo", root_dir=tmp_path),
         source=SourceConfig(use_huggingface=True),
         annotation=AnnotationConfig(confidence_threshold=0.6, effect_labels=effect_labels),
+        request=RequestConfig(topic="minecraft instructions", domain="minecraft", modality="text"),
     )
     return PipelineContext.from_config(config)
 
@@ -109,6 +111,20 @@ def test_annotation_prompt_contract_is_russian_and_structured(tmp_path: Path) ->
     assert "negative, neutral или positive" in prompt
     assert "energy, side_effects, other" in prompt
     assert "Пример отзыва" in prompt
+    assert "пищевых добавках" not in prompt
+
+
+def test_annotation_prompt_uses_current_topic_and_avoids_fitness_only_wording(tmp_path: Path) -> None:
+    """Prompt text should follow the active config topic instead of a supplements-only narrative."""
+
+    effect_labels = ["crafting", "combat", "enchantments"]
+    agent = AnnotationAgent(_make_context_with_effect_labels(tmp_path, effect_labels), registry=FakeRegistry())
+
+    prompt = agent.build_annotation_prompt("Enchantments help with progression.", effect_labels)
+
+    assert "minecraft instructions" in prompt
+    assert "пищевых добавках" not in prompt
+    assert "Текст для разметки" in prompt
 
 
 def test_auto_label_parses_partial_generate_output_with_safe_fallback(tmp_path: Path) -> None:

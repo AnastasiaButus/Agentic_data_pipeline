@@ -1,0 +1,5 @@
+metric,before,after
+"""n_rows""",3.0,3.0
+"""duplicates""",0.0,0.0
+"""empty_text""",0.0,0.0
+"""mean_words""",8.0,8.0

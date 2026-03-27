@@ -12,6 +12,11 @@ from src.providers.labelstudio.validators import validate_labelstudio_tasks
 from src.providers.llm.mock_llm import MockLLM
 from src.services.artifact_registry import ArtifactRegistry
 
+try:  # pragma: no cover - exercised when sklearn is installed in the runtime.
+    from sklearn.metrics import cohen_kappa_score
+except ImportError:  # pragma: no cover - fallback keeps local/offline tests runnable.
+    cohen_kappa_score = None  # type: ignore[assignment]
+
 
 ANNOTATION_COLUMNS = ("sentiment_label", "effect_label", "confidence")
 EFFECT_LABELS = ["energy", "side_effects", "other"]
@@ -105,18 +110,34 @@ class AnnotationAgent(BaseAgent):
 
         rows = self._to_records(df_labeled)
         if not rows:
-            return {"label_dist": {}, "confidence_mean": 0.0, "n_low_confidence": 0, "n_rows": 0}
+            return {
+                "label_dist": {},
+                "confidence_mean": 0.0,
+                "n_low_confidence": 0,
+                "n_rows": 0,
+                "confidence_threshold": self._confidence_threshold(),
+                "agreement": None,
+                "kappa": None,
+            }
 
         label_counts: dict[str, int] = {}
         confidence_values: list[float] = []
         threshold = self._confidence_threshold()
         n_low_confidence = 0
-        use_effect_labels = any(self._normalize_label(row.get("effect_label")) for row in rows)
+        use_effect_labels = any(self._normalize_optional_label(row.get("effect_label")) for row in rows)
+        auto_labels: list[str] = []
+        human_labels: list[str] = []
 
         for row in rows:
             raw_label = row.get("effect_label") if use_effect_labels else row.get("label")
-            label = self._normalize_label(raw_label or "other")
+            label = self._normalize_optional_label(raw_label) or "other"
             label_counts[label] = label_counts.get(label, 0) + 1
+
+            reviewed_label = self._normalize_optional_label(row.get("reviewed_effect_label"))
+            auto_effect_label = self._normalize_optional_label(row.get("effect_label"))
+            if reviewed_label and auto_effect_label:
+                auto_labels.append(auto_effect_label)
+                human_labels.append(reviewed_label)
 
             confidence = self._coerce_confidence(row.get("confidence"))
             confidence_values.append(confidence)
@@ -126,12 +147,25 @@ class AnnotationAgent(BaseAgent):
         total = sum(label_counts.values())
         label_dist = {label: count / total for label, count in label_counts.items()}
         confidence_mean = sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
+        agreement: float | None = None
+        kappa: float | None = None
+        if human_labels:
+            matches = sum(1 for auto_label, human_label in zip(auto_labels, human_labels) if auto_label == human_label)
+            agreement = matches / len(human_labels)
+            if cohen_kappa_score is not None:
+                try:
+                    kappa = float(cohen_kappa_score(human_labels, auto_labels))
+                except Exception:
+                    kappa = None
+
         return {
             "label_dist": label_dist,
             "confidence_mean": confidence_mean,
             "n_low_confidence": n_low_confidence,
             "n_rows": len(rows),
             "confidence_threshold": threshold,
+            "agreement": agreement,
+            "kappa": kappa,
         }
 
     def export_to_labelstudio(self, df_labeled: Any) -> list[dict[str, Any]]:
@@ -283,6 +317,16 @@ class AnnotationAgent(BaseAgent):
 
         label = str(value).strip().lower().replace(" ", "_").replace("-", "_")
         return label or "other"
+
+    def _normalize_optional_label(self, value: Any) -> str:
+        """Normalize a label while preserving missing values as empty strings."""
+
+        if value is None:
+            return ""
+        label = str(value).strip()
+        if not label:
+            return ""
+        return self._normalize_label(label)
 
     def _slugify(self, text: str) -> str:
         """Create a stable identifier for the spec name."""

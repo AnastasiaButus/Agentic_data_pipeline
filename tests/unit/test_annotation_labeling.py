@@ -148,6 +148,48 @@ def test_check_quality_reports_core_metrics(tmp_path: Path) -> None:
     assert "label_dist" in report
     assert "confidence_mean" in report
     assert "n_low_confidence" in report
+    assert report["agreement"] is None
+    assert report["kappa"] is None
+
+
+def test_check_quality_computes_agreement_and_kappa_from_reviewed_effect_labels(tmp_path: Path) -> None:
+    """Quality summaries should compare auto effect labels against reviewed_effect_label when present."""
+
+    agent = AnnotationAgent(_make_context(tmp_path), registry=FakeRegistry())
+
+    report = agent.check_quality(
+        _Frame(
+            [
+                {"id": "1", "source": "HF", "text": "Crafting guide", "label": None, "effect_label": "crafting", "reviewed_effect_label": "crafting", "confidence": 0.9, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+                {"id": "2", "source": "HF", "text": "Combat tips", "label": None, "effect_label": "combat", "reviewed_effect_label": "crafting", "confidence": 0.4, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+                {"id": "3", "source": "HF", "text": "Enchantments guide", "label": None, "effect_label": "crafting", "reviewed_effect_label": "crafting", "confidence": 0.8, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+            ]
+        )
+    )
+
+    assert report["label_dist"] == {"crafting": 2 / 3, "combat": 1 / 3}
+    assert report["agreement"] == pytest.approx(2 / 3)
+    assert report["kappa"] is None or isinstance(report["kappa"], float)
+    assert report["confidence_mean"] == pytest.approx((0.9 + 0.4 + 0.8) / 3)
+    assert report["n_low_confidence"] == 1
+
+
+def test_check_quality_returns_none_agreement_without_human_labels(tmp_path: Path) -> None:
+    """When reviewed_effect_label is absent, agreement and kappa should remain unset."""
+
+    agent = AnnotationAgent(_make_context(tmp_path), registry=FakeRegistry())
+
+    report = agent.check_quality(
+        _Frame(
+            [
+                {"id": "1", "source": "HF", "text": "Crafting guide", "label": None, "effect_label": "crafting", "confidence": 0.9, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+                {"id": "2", "source": "HF", "text": "Combat tips", "label": None, "effect_label": "combat", "confidence": 0.4, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+            ]
+        )
+    )
+
+    assert report["agreement"] is None
+    assert report["kappa"] is None
 
 
 def test_check_quality_uses_effect_labels_when_present(tmp_path: Path) -> None:
@@ -178,7 +220,15 @@ def test_check_quality_empty_input_is_safe(tmp_path: Path) -> None:
 
     report = agent.check_quality(_Frame([]))
 
-    assert report == {"label_dist": {}, "confidence_mean": 0.0, "n_low_confidence": 0, "n_rows": 0}
+    assert report == {
+        "label_dist": {},
+        "confidence_mean": 0.0,
+        "n_low_confidence": 0,
+        "n_rows": 0,
+        "confidence_threshold": 0.6,
+        "agreement": None,
+        "kappa": None,
+    }
 
 
 def test_auto_label_uses_configured_effect_labels(tmp_path: Path) -> None:

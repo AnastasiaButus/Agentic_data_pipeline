@@ -1,0 +1,14 @@
+[
+  {
+    "source_id": "demo_minecraft_scrape",
+    "source_type": "scrape",
+    "title": "Minecraft Instructions Offline Demo",
+    "uri": "demo://minecraft-instructions",
+    "score": 1.0,
+    "metadata": {
+      "html": "<html><body><div class=\"review\" data-text=\"Minecraft review: energy tip for long survival builds\" data-rating=\"5\">Helpful building guide</div><div class=\"review\" data-text=\"Minecraft review: side effect warning from risky potion use\" data-rating=\"1\">Potion side effect note</div><div class=\"review\" data-text=\"Minecraft review: crafting instructions for redstone tools\" data-rating=\"3\">Crafting instructions summary</div></body></html>",
+      "demo_mode": true,
+      "topic": "minecraft instructions"
+    }
+  }
+]

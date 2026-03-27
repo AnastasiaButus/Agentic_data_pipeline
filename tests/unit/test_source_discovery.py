@@ -15,10 +15,19 @@ class FakeRegistry:
 
     def __init__(self) -> None:
         self.saved: tuple[str, object] | None = None
+        self.files: dict[str, object] = {}
 
     def save_json(self, path: str | Path, payload: object) -> Path:
-        self.saved = (str(path), payload)
+        normalized_path = str(path)
+        self.saved = (normalized_path, payload)
+        self.files[normalized_path] = payload
         return Path(path)
+
+    def exists(self, path: str | Path) -> bool:
+        return str(path) in self.files
+
+    def load_json(self, path: str | Path) -> object:
+        return self.files[str(path)]
 
 
 class FakeGitHubClient:
@@ -196,6 +205,82 @@ def test_non_demo_stub_methods_return_empty_lists(tmp_path: Path) -> None:
     assert service.search_internal_apis() == []
     assert service.search_public_apis() == []
     assert service.search_web_pages_for_scraping() == []
+
+
+def test_approved_sources_file_filters_shortlist_by_source_id(monkeypatch, tmp_path: Path) -> None:
+    """Approved source ids should filter the discovered shortlist deterministically."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
+    registry = FakeRegistry()
+    service = SourceDiscoveryService(context, registry=registry)
+
+    monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: {
+        "datasets": [
+            {
+                "id": "fitness/supplements-reviews",
+                "title": "Fitness Supplements Reviews",
+                "downloads": 1234,
+                "likes": 56,
+                "tags": ["text-classification", "reviews"],
+            },
+            {
+                "id": "fitness/other-dataset",
+                "title": "Other Dataset",
+                "downloads": 222,
+                "likes": 1,
+                "tags": ["reviews"],
+            },
+        ]
+    })
+
+    discovered = service.run()
+    registry.save_json("data/raw/approved_sources.json", ["fitness/supplements-reviews"])
+
+    approved = service.filter_approved_candidates(discovered)
+
+    assert [candidate.source_id for candidate in approved] == ["fitness/supplements-reviews"]
+
+
+def test_unknown_approved_source_ids_are_ignored_safely(monkeypatch, tmp_path: Path) -> None:
+    """Unknown approved ids should be ignored without breaking the approval helper."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
+    registry = FakeRegistry()
+    service = SourceDiscoveryService(context, registry=registry)
+
+    monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: {
+        "datasets": [
+            {"id": "fitness/supplements-reviews", "title": "Fitness Supplements Reviews", "downloads": 1234, "likes": 56, "tags": ["text-classification", "reviews"]},
+            {"id": "fitness/other-dataset", "title": "Other Dataset", "downloads": 222, "likes": 1, "tags": ["reviews"]},
+        ]
+    })
+
+    discovered = service.run()
+    registry.save_json("data/raw/approved_sources.json", ["missing-id", "fitness/other-dataset"])
+
+    approved = service.filter_approved_candidates(discovered)
+
+    assert [candidate.source_id for candidate in approved] == ["fitness/other-dataset"]
+
+
+def test_missing_approved_sources_file_returns_original_shortlist(monkeypatch, tmp_path: Path) -> None:
+    """Absence of approved_sources.json should not alter the shortlist helper output."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
+    service = SourceDiscoveryService(context)
+
+    shortlist = [
+        SourceCandidate("hf-1", "hf_dataset", "HF 1", "dataset/one", score=1.0),
+        SourceCandidate("api-1", "api", "API 1", "https://api/one", score=0.5),
+    ]
+
+    assert service.filter_approved_candidates(shortlist) == shortlist
 
 
 def test_demo_config_keeps_offline_demo_path(tmp_path: Path) -> None:

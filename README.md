@@ -58,6 +58,14 @@ For non-demo configs, source discovery can now query the public Hugging Face dat
 
 If the online lookup fails, the service falls back safely instead of breaking the pipeline. The offline demo path remains unchanged and still uses the local deterministic payloads.
 
+## Source Approval Gate MVP
+
+After discovery, shortlist candidates can be filtered through a minimal approval gate before any future collection step.
+
+The MVP uses a simple `data/raw/approved_sources.json` file containing a JSON list of approved `source_id` strings. If the file is missing, the shortlist helper returns the original shortlist unchanged.
+
+This is a discovery-side approval checkpoint only. It is not a UI, not a production approval workflow, and it does not change the offline demo mode.
+
 ## Artifacts Produced
 
 A successful demo run produces artifacts such as:
@@ -72,6 +80,7 @@ A successful demo run produces artifacts such as:
 
 - Online discovery is not complete.
 - The online capability currently starts with Hugging Face datasets discovery and does not cover the full collection pipeline.
+- The approval gate MVP is file-based and intentionally minimal; it only filters shortlist candidates by approved `source_id` values.
 - The demo datasets are intentionally small and synthetic/local.
 - The offline demo path is meant for reproducible coursework-style runs, not for production use.
 - Some stages are intentionally deterministic to keep the baseline stable for local execution.

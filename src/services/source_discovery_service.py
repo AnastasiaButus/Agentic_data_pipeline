@@ -211,6 +211,60 @@ class SourceDiscoveryService:
         self.registry.save_json("data/raw/discovered_sources.json", [candidate.as_dict() for candidate in ranked])
         return ranked
 
+    def load_approved_source_ids(self, path: str | Path = "data/raw/approved_sources.json") -> list[str] | None:
+        """Load approved source ids from a simple JSON list.
+
+        The approval MVP uses a flat list of source_id strings so it stays easy to inspect and
+        test. Missing approval files are treated as "no approval gate present".
+        """
+
+        if not self.registry.exists(path):
+            return None
+
+        payload = self.registry.load_json(path)
+        if not isinstance(payload, list):
+            return []
+
+        approved_ids: list[str] = []
+        for item in payload:
+            if isinstance(item, str):
+                normalized = item.strip()
+                if normalized:
+                    approved_ids.append(normalized)
+
+        return approved_ids
+
+    def filter_approved_candidates(
+        self,
+        candidates: list[SourceCandidate],
+        approved_source_ids: list[str] | None = None,
+        path: str | Path = "data/raw/approved_sources.json",
+    ) -> list[SourceCandidate]:
+        """Filter a shortlist down to approved candidates when an approval file exists.
+
+        If the approval file is missing, the shortlist is returned unchanged so the baseline flow
+        remains predictable. Unknown approved ids are ignored safely.
+        """
+
+        ids = approved_source_ids if approved_source_ids is not None else self.load_approved_source_ids(path)
+        if ids is None:
+            return list(candidates)
+
+        approved_set = {source_id for source_id in ids if source_id}
+        if not approved_set:
+            return []
+
+        return [candidate for candidate in candidates if candidate.source_id in approved_set]
+
+    def load_approved_candidates(
+        self,
+        candidates: list[SourceCandidate],
+        path: str | Path = "data/raw/approved_sources.json",
+    ) -> list[SourceCandidate]:
+        """Return the approved subset for a shortlist using the approval file MVP."""
+
+        return self.filter_approved_candidates(candidates, path=path)
+
     def _demo_candidates(self) -> list[SourceCandidate]:
         """Return local, offline source candidates for the persistent demo configs."""
 

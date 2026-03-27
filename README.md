@@ -42,7 +42,42 @@ After auto-annotation, the pipeline also writes `data/interim/review_queue.csv` 
 
 The annotation stage also writes a compact Russian annotation trace pack: `reports/annotation_trace_report.md` and `data/interim/annotation_trace.json`. It records the prompt contract, the expected output fields, and the parser/fallback behavior used for auto-labeling. This is a reporting artifact layer, not a real API client.
 
-The online Gemini path is opt-in and intentionally narrow. Set `annotation.use_llm=true`, `annotation.llm_provider: gemini`, and `GEMINI_API_KEY` to use the Gemini Developer API for annotation. Without that config, or if the key is missing, the pipeline stays on the offline MockLLM path. This is not documented as a production-ready integration.
+### How to Enable Gemini Annotation
+
+The online Gemini path is opt-in and intentionally narrow. It is enabled only when all three are true:
+
+- `annotation.use_llm: true`
+- `annotation.llm_provider: gemini`
+- `GEMINI_API_KEY` is set in the current shell
+
+The `configs/demo_fitness.yaml` baseline is deliberately pinned to `llm_provider: mock`, so the demo run stays offline and deterministic by default. If the key is missing, the pipeline does not fail; it falls back to the existing `MockLLM` path.
+
+### PowerShell Example
+
+Set the key for the current PowerShell session like this:
+
+```powershell
+$env:GEMINI_API_KEY = 'your-gemini-api-key'
+```
+
+Then run the pipeline with a config that explicitly sets `annotation.llm_provider: gemini`. You can either create a small separate config file for that purpose or temporarily change `llm_provider` in your own config before running it.
+
+```powershell
+python run_pipeline.py --config configs/your_gemini_config.yaml
+```
+
+This only affects the current shell session. It does not add any secret loader, vault integration, `.env` behavior, or UI.
+
+### How to Verify the Active Path
+
+Check the annotation trace after a run:
+
+- Gemini path: `llm_mode == generate_parse`
+- Mock/offline path: `llm_mode == classify_effect`
+
+The trace is written to `data/interim/annotation_trace.json` and `reports/annotation_trace_report.md`.
+
+This is an MVP integration, not production-ready secret management and not a full provider framework.
 
 The corrected review queue is still edited by a human separately in `data/interim/review_queue_corrected.csv`.
 

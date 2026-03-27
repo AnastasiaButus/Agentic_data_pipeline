@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import posixpath
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,7 @@ from src.services.artifact_registry import ArtifactRegistry
 
 
 class ReportingService:
-    """Render markdown reports for each pipeline stage and the final summary."""
+    """Render markdown and HTML reports for each pipeline stage and the final summary."""
 
     def __init__(self, ctx: PipelineContext, registry: ArtifactRegistry | None = None) -> None:
         """Bind the reporting service to the active context and artifact registry."""
@@ -670,6 +671,7 @@ class ReportingService:
         lines = ["# Final Report", ""]
         section_titles = {
             "runtime": "Runtime",
+            "dashboard": "Dashboard",
             "sources": "Sources",
             "quality": "Quality",
             "eda": "EDA",
@@ -680,7 +682,7 @@ class ReportingService:
             "training": "Training",
             "artifacts": "Artifacts",
         }
-        for section_name in ["runtime", "sources", "quality", "eda", "annotation", "review", "approval", "active_learning", "training", "artifacts"]:
+        for section_name in ["runtime", "dashboard", "sources", "quality", "eda", "annotation", "review", "approval", "active_learning", "training", "artifacts"]:
             section = summary.get(section_name)
             lines.append(f"## {section_titles[section_name]}")
             lines.append("")
@@ -697,6 +699,327 @@ class ReportingService:
         path = "final_report.md"
         self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
         return path
+
+    def write_run_dashboard(self, summary: dict[str, Any]) -> str:
+        """Write a single-page operator dashboard that links the user to the main artifacts."""
+
+        runtime = summary.get("runtime", {}) if isinstance(summary.get("runtime"), dict) else {}
+        dashboard = summary.get("dashboard", {}) if isinstance(summary.get("dashboard"), dict) else {}
+        sources = summary.get("sources", {}) if isinstance(summary.get("sources"), dict) else {}
+        quality = summary.get("quality", {}) if isinstance(summary.get("quality"), dict) else {}
+        eda = summary.get("eda", {}) if isinstance(summary.get("eda"), dict) else {}
+        annotation = summary.get("annotation", {}) if isinstance(summary.get("annotation"), dict) else {}
+        review = summary.get("review", {}) if isinstance(summary.get("review"), dict) else {}
+        approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
+        training = summary.get("training", {}) if isinstance(summary.get("training"), dict) else {}
+
+        dashboard_path = self._normalize_artifact_reference(dashboard.get("dashboard_path") or "reports/run_dashboard.html")
+        final_report_path = self._normalize_artifact_reference(dashboard.get("final_report_path") or "final_report.md")
+        pipeline_status = self._normalize_text(dashboard.get("pipeline_status")) or "completed"
+        attention_required = pipeline_status == "attention_required"
+        review_required = bool(review.get("review_required", False))
+        configured_remote = runtime.get("configured_remote_source_types", []) if isinstance(runtime.get("configured_remote_source_types"), list) else []
+        active_remote = runtime.get("active_remote_source_types", []) if isinstance(runtime.get("active_remote_source_types"), list) else []
+
+        status_cards = [
+            ("Runtime mode", self._normalize_text(runtime.get("effective_mode")) or "unknown"),
+            ("Source candidates", self._format_numeric(sources.get("n_candidates", 0))),
+            ("Review queue", self._format_numeric(review.get("review_queue_rows", 0))),
+            ("Approval", self._normalize_text(approval.get("approval_status")) or "unknown"),
+            ("Accuracy", self._format_numeric(training.get("accuracy", "n/a"))),
+            ("F1", self._format_numeric(training.get("f1", "n/a"))),
+        ]
+        status_cards_html = "".join(
+            (
+                '<article class="metric-card">'
+                f'<div class="metric-label">{self._escape_html(label)}</div>'
+                f'<div class="metric-value">{self._escape_html(value)}</div>'
+                "</article>"
+            )
+            for label, value in status_cards
+        )
+
+        step_cards_html = "".join(
+            self._render_pipeline_step_card(step)
+            for step in self._build_dashboard_pipeline_steps(summary)
+        )
+
+        primary_links = [
+            {
+                "label": "Open final report",
+                "path": final_report_path,
+                "description": "Сводный markdown-отчёт по всему запуску.",
+            },
+            {
+                "label": "Open EDA HTML",
+                "path": eda.get("eda_html_report_path"),
+                "description": "Наглядный HTML-отчёт для демонстрации данных.",
+            },
+            {
+                "label": "Open review guide",
+                "path": review.get("review_queue_report_path"),
+                "description": "Инструкция и очередь ручной проверки для HITL.",
+            },
+            {
+                "label": "Open source shortlist",
+                "path": sources.get("source_report_path"),
+                "description": "Shortlist найденных источников и approval guidance.",
+            },
+        ]
+        primary_links_html = "".join(
+            self._render_dashboard_link_tile(
+                dashboard_path,
+                item["label"],
+                item["path"],
+                item["description"],
+                expected=False,
+            )
+            for item in primary_links
+        )
+
+        artifact_groups_html = "".join(
+            self._render_dashboard_artifact_group(dashboard_path, group)
+            for group in self._build_dashboard_artifact_groups(summary)
+        )
+
+        warnings = quality.get("warnings", []) if isinstance(quality.get("warnings"), list) else []
+        warnings_html = (
+            "<ul>" + "".join(f"<li>{self._escape_html(item)}</li>" for item in warnings) + "</ul>"
+            if warnings
+            else '<p class="muted">Quality stage не вернул предупреждений.</p>'
+        )
+
+        next_step = self._normalize_text(dashboard.get("next_step")) or self._normalize_text(review.get("next_step")) or "inspect artifacts"
+        primary_action = self._normalize_text(dashboard.get("primary_action")) or "inspect dashboard artifacts"
+        action_title = "Требуется действие человека" if attention_required else "Запуск завершён"
+        action_class = "action-card attention" if attention_required else "action-card success"
+        action_text = (
+            "Pipeline дошёл до точки HITL и ждёт ручной проверки before retrain."
+            if attention_required
+            else "Все основные шаги текущего запуска завершены, артефакты готовы к просмотру."
+        )
+
+        html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pipeline Operator Dashboard</title>
+  <style>
+    :root {{
+      --bg: #f3ede3;
+      --panel: rgba(255, 250, 243, 0.94);
+      --ink: #1f2a30;
+      --muted: #5d6a72;
+      --accent: #1f6f78;
+      --accent-soft: #cbe5df;
+      --warm: #d97706;
+      --warm-soft: #fde7c7;
+      --line: rgba(31, 42, 48, 0.12);
+      --shadow: 0 22px 48px rgba(31, 42, 48, 0.10);
+      --radius: 22px;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: "Segoe UI Variable Text", "Trebuchet MS", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(31, 111, 120, 0.16), transparent 28%),
+        radial-gradient(circle at top right, rgba(217, 119, 6, 0.18), transparent 24%),
+        linear-gradient(180deg, #f8f3eb 0%, var(--bg) 100%);
+      min-height: 100vh;
+    }}
+    .shell {{ max-width: 1240px; margin: 0 auto; padding: 32px 20px 48px; }}
+    .hero {{
+      background: linear-gradient(135deg, rgba(255, 250, 243, 0.98), rgba(244, 237, 227, 0.92));
+      border: 1px solid var(--line);
+      border-radius: calc(var(--radius) + 4px);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      position: relative;
+      padding: 28px;
+      animation: rise 420ms ease-out;
+    }}
+    .hero::after {{
+      content: "";
+      position: absolute;
+      inset: auto -60px -70px auto;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(31, 111, 120, 0.16) 0%, transparent 68%);
+      pointer-events: none;
+    }}
+    .hero-grid {{ display: grid; grid-template-columns: 1.8fr 1fr; gap: 22px; align-items: start; }}
+    .eyebrow {{
+      text-transform: uppercase;
+      letter-spacing: 0.10em;
+      font-size: 12px;
+      color: var(--accent);
+      margin-bottom: 10px;
+      font-weight: 700;
+    }}
+    h1 {{ font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.03; margin: 0 0 14px; }}
+    .lede {{ max-width: 760px; line-height: 1.65; color: var(--muted); margin: 0; }}
+    .hero-meta {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }}
+    .meta-pill, .tag {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.8);
+    }}
+    .tag-wrap {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }}
+    .status-grid, .quick-links, .artifact-grid, .step-grid {{ display: grid; gap: 16px; }}
+    .status-grid {{ grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); margin-top: 24px; }}
+    .metric-card, .panel, .step-card, .artifact-group, .link-tile {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: 0 12px 28px rgba(31, 42, 48, 0.06);
+    }}
+    .metric-card {{ padding: 18px; animation: rise 420ms ease-out; }}
+    .metric-label {{ font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }}
+    .metric-value {{ margin-top: 10px; font-size: 1.65rem; font-weight: 700; }}
+    .hero-side {{ display: flex; flex-direction: column; gap: 14px; }}
+    .action-card {{ padding: 18px; border-radius: var(--radius); border: 1px solid transparent; }}
+    .action-card.attention {{ background: linear-gradient(135deg, #fff7eb, #ffe7c3); border-color: rgba(217, 119, 6, 0.24); }}
+    .action-card.success {{ background: linear-gradient(135deg, #f4fffc, #ddf4ed); border-color: rgba(31, 111, 120, 0.20); }}
+    .action-card h2 {{ margin: 0 0 10px; font-size: 1.05rem; }}
+    .action-card p {{ margin: 0 0 10px; line-height: 1.55; }}
+    .layout {{ display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px; margin-top: 22px; }}
+    .panel {{ padding: 22px; animation: rise 460ms ease-out; }}
+    .panel h2 {{ margin: 0 0 10px; font-size: 1.15rem; }}
+    .panel p {{ margin: 0; color: var(--muted); line-height: 1.6; }}
+    .step-grid {{ grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-top: 16px; }}
+    .step-card {{ padding: 18px; position: relative; overflow: hidden; }}
+    .step-card::before {{ content: ""; position: absolute; inset: 0 auto 0 0; width: 5px; background: var(--accent-soft); }}
+    .step-card.attention::before {{ background: var(--warm); }}
+    .step-card.complete::before {{ background: var(--accent); }}
+    .step-badge {{
+      display: inline-block;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: #eef7f5;
+      color: var(--accent);
+    }}
+    .step-card.attention .step-badge {{ background: var(--warm-soft); color: #9a5a03; }}
+    .step-title {{ margin-top: 12px; font-size: 1rem; font-weight: 700; }}
+    .step-detail {{ margin-top: 8px; color: var(--muted); line-height: 1.55; font-size: 0.95rem; }}
+    .quick-links {{ grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 16px; }}
+    .link-tile {{
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      padding: 18px;
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }}
+    .link-tile:hover {{ transform: translateY(-2px); box-shadow: 0 18px 34px rgba(31, 42, 48, 0.10); border-color: rgba(31, 111, 120, 0.26); }}
+    .link-tile .title {{ font-size: 1rem; font-weight: 700; }}
+    .link-tile .path {{ margin-top: 8px; font-family: "Cascadia Mono", "Consolas", monospace; font-size: 0.82rem; color: var(--accent); word-break: break-all; }}
+    .link-tile .description {{ margin-top: 8px; color: var(--muted); line-height: 1.5; font-size: 0.92rem; }}
+    .artifact-grid {{ grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 16px; }}
+    .artifact-group {{ padding: 20px; }}
+    .artifact-group h3 {{ margin: 0 0 12px; font-size: 1rem; }}
+    .artifact-list {{ display: grid; gap: 10px; }}
+    .artifact-item {{ border-top: 1px solid var(--line); padding-top: 10px; }}
+    .artifact-item:first-child {{ border-top: none; padding-top: 0; }}
+    .artifact-item a {{ color: var(--ink); text-decoration: none; font-weight: 600; }}
+    .artifact-item a:hover {{ color: var(--accent); }}
+    .artifact-status {{
+      display: inline-flex;
+      align-items: center;
+      margin-top: 6px;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: #edf7f4;
+      color: var(--accent);
+    }}
+    .artifact-status.expected {{ background: var(--warm-soft); color: #9a5a03; }}
+    .artifact-note, .muted {{ color: var(--muted); font-size: 0.92rem; line-height: 1.5; }}
+    .artifact-path {{ margin-top: 6px; font-family: "Cascadia Mono", "Consolas", monospace; font-size: 0.8rem; color: var(--accent); word-break: break-all; }}
+    @keyframes rise {{ from {{ opacity: 0; transform: translateY(8px); }} to {{ opacity: 1; transform: translateY(0); }} }}
+    @media (max-width: 900px) {{ .hero-grid, .layout {{ grid-template-columns: 1fr; }} }}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="eyebrow">Operator Entry Point</div>
+          <h1>Pipeline Run Dashboard</h1>
+          <p class="lede">Одна страница для запуска, защиты и ручной работы с пайплайном. Здесь видно режим выполнения, текущий статус цикла агентов, HITL-сигналы и быстрые переходы к ключевым артефактам без поиска по папкам.</p>
+          <div class="hero-meta">
+            <span class="meta-pill">project: {self._escape_html(getattr(self.ctx.config.project, "name", ""))}</span>
+            <span class="meta-pill">topic: {self._escape_html(getattr(self.ctx.config.request, "topic", ""))}</span>
+            <span class="meta-pill">requested_mode: {self._escape_html(runtime.get("requested_mode", "auto"))}</span>
+            <span class="meta-pill">effective_mode: {self._escape_html(runtime.get("effective_mode", "unknown"))}</span>
+          </div>
+          <div class="status-grid">{status_cards_html}</div>
+        </div>
+        <div class="hero-side">
+          <div class="{action_class}">
+            <h2>{self._escape_html(action_title)}</h2>
+            <p>{self._escape_html(action_text)}</p>
+            <p><strong>Primary action:</strong> {self._escape_html(primary_action)}</p>
+            <p><strong>Next step:</strong> {self._escape_html(next_step)}</p>
+          </div>
+          <div class="panel">
+            <h2>Runtime activation</h2>
+            <p>Configured remote source types</p>
+            <div class="tag-wrap">{self._render_dashboard_tag_list(configured_remote, empty_label="нет")}</div>
+            <p style="margin-top: 16px;">Active remote source types</p>
+            <div class="tag-wrap">{self._render_dashboard_tag_list(active_remote, empty_label="нет")}</div>
+            <p style="margin-top: 16px;">Demo sources enabled: <strong>{self._escape_html("yes" if runtime.get("demo_sources_enabled") else "no")}</strong></p>
+            <p>Human review required: <strong>{self._escape_html("yes" if review_required else "no")}</strong></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <h2>Pipeline cycle</h2>
+        <p>Статусы показывают, где мы находимся после текущего запуска и требует ли система ручного шага перед следующим retrain.</p>
+        <div class="step-grid">{step_cards_html}</div>
+      </div>
+      <div class="panel">
+        <h2>Quality and review signals</h2>
+        {warnings_html}
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top: 20px;">
+      <h2>Open first</h2>
+      <p>Быстрые переходы к тем артефактам, которые чаще всего нужны на защите и в ручном workflow.</p>
+      <div class="quick-links">{primary_links_html}</div>
+    </section>
+
+    <section class="panel" style="margin-top: 20px;">
+      <h2>Artifacts by role</h2>
+      <p>Здесь собраны human-facing отчёты, HITL-файлы, source/approval контекст и модельные артефакты. Ожидаемые входные файлы помечаются отдельно, если они ещё не созданы.</p>
+      <div class="artifact-grid">{artifact_groups_html}</div>
+    </section>
+  </div>
+</body>
+</html>"""
+
+        self.registry.save_text(Path(dashboard_path), html)
+        return dashboard_path
 
     def _to_records(self, df: Any) -> list[dict[str, Any]]:
         """Materialize dataframe-like inputs into row dictionaries."""
@@ -752,6 +1075,255 @@ class ReportingService:
             return str(int(numeric))
 
         return f"{numeric:.3f}".rstrip("0").rstrip(".")
+
+    def _normalize_artifact_reference(self, value: Any) -> str:
+        """Normalize local artifact references into project-relative POSIX paths when possible."""
+
+        text = self._normalize_text(value)
+        if not text:
+            return ""
+        if "://" in text:
+            return text
+
+        candidate = Path(text)
+        if not candidate.is_absolute():
+            return Path(text.replace("\\", "/")).as_posix()
+
+        root_dir = Path(self.ctx.paths.root_dir).resolve(strict=False)
+        resolved_candidate = candidate.resolve(strict=False)
+        try:
+            return resolved_candidate.relative_to(root_dir).as_posix()
+        except ValueError:
+            return resolved_candidate.as_posix()
+
+    def _artifact_reference_exists(self, value: Any) -> bool:
+        """Check whether a local artifact path currently exists under the project root."""
+
+        normalized = self._normalize_artifact_reference(value)
+        if not normalized or "://" in normalized:
+            return False
+        try:
+            return self.registry.exists(normalized)
+        except Exception:
+            return False
+
+    def _dashboard_href(self, dashboard_path: str, target_path: Any) -> str:
+        """Build an HTML-friendly relative href from the dashboard to a local artifact."""
+
+        normalized_target = self._normalize_artifact_reference(target_path)
+        if not normalized_target:
+            return ""
+        if "://" in normalized_target:
+            return normalized_target
+
+        normalized_dashboard = self._normalize_artifact_reference(dashboard_path)
+        start_dir = posixpath.dirname(normalized_dashboard) or "."
+        return posixpath.relpath(normalized_target, start=start_dir)
+
+    def _render_dashboard_tag_list(self, values: list[Any], *, empty_label: str) -> str:
+        """Render a compact tag list for runtime-mode metadata."""
+
+        cleaned = [self._normalize_text(value) for value in values if self._normalize_text(value)]
+        if not cleaned:
+            cleaned = [empty_label]
+        return "".join(f'<span class="tag">{self._escape_html(value)}</span>' for value in cleaned)
+
+    def _build_dashboard_pipeline_steps(self, summary: dict[str, Any]) -> list[dict[str, str]]:
+        """Build a compact status view for the main pipeline cycle."""
+
+        sources = summary.get("sources", {}) if isinstance(summary.get("sources"), dict) else {}
+        quality = summary.get("quality", {}) if isinstance(summary.get("quality"), dict) else {}
+        annotation = summary.get("annotation", {}) if isinstance(summary.get("annotation"), dict) else {}
+        review = summary.get("review", {}) if isinstance(summary.get("review"), dict) else {}
+        training = summary.get("training", {}) if isinstance(summary.get("training"), dict) else {}
+
+        warnings = quality.get("warnings", []) if isinstance(quality.get("warnings"), list) else []
+        review_required = bool(review.get("review_required"))
+        review_status = self._normalize_text(review.get("status")) or "unknown"
+        review_needs_action = review_required and review_status == "skipped_missing_corrected_queue"
+        training_detail = "accuracy: {accuracy}, f1: {f1}".format(
+            accuracy=self._format_numeric(training.get("accuracy", "n/a")),
+            f1=self._format_numeric(training.get("f1", "n/a")),
+        )
+
+        return [
+            {
+                "name": "Discovery",
+                "status": "complete",
+                "badge": "ready",
+                "detail": f"Shortlist built: {self._format_numeric(sources.get('n_candidates', 0))} candidate(s).",
+            },
+            {
+                "name": "Collection + Quality",
+                "status": "complete",
+                "badge": "ready",
+                "detail": f"Quality warnings: {self._format_numeric(len(warnings))}.",
+            },
+            {
+                "name": "Annotation",
+                "status": "complete",
+                "badge": "ready",
+                "detail": "Low-confidence rows: {count} at threshold {threshold}.".format(
+                    count=self._format_numeric(annotation.get("n_low_confidence", 0)),
+                    threshold=self._format_numeric(annotation.get("confidence_threshold", 0)),
+                ),
+            },
+            {
+                "name": "Human Review",
+                "status": "attention" if review_needs_action else "complete",
+                "badge": "action" if review_needs_action else "ready",
+                "detail": self._normalize_text(review.get("next_step"))
+                or ("HITL step completed for current run." if not review_required else "Manual review still expected."),
+            },
+            {
+                "name": "Active Learning",
+                "status": "complete",
+                "badge": "ready",
+                "detail": "Active-learning cycle finished for the current reviewed dataset.",
+            },
+            {
+                "name": "Training + Reporting",
+                "status": "complete",
+                "badge": "ready",
+                "detail": training_detail,
+            },
+        ]
+
+    def _render_pipeline_step_card(self, step: dict[str, Any]) -> str:
+        """Render one pipeline-step card for the operator dashboard."""
+
+        status = self._normalize_text(step.get("status")) or "complete"
+        badge = self._normalize_text(step.get("badge")) or status
+        badge_label = "needs action" if badge == "action" else "ready"
+        return (
+            f'<article class="step-card {self._escape_html(status)}">'
+            f'<span class="step-badge">{self._escape_html(badge_label)}</span>'
+            f'<div class="step-title">{self._escape_html(step.get("name"))}</div>'
+            f'<div class="step-detail">{self._escape_html(step.get("detail"))}</div>'
+            "</article>"
+        )
+
+    def _build_dashboard_artifact_groups(self, summary: dict[str, Any]) -> list[dict[str, Any]]:
+        """Group the main run artifacts by the job they play for the operator."""
+
+        dashboard = summary.get("dashboard", {}) if isinstance(summary.get("dashboard"), dict) else {}
+        sources = summary.get("sources", {}) if isinstance(summary.get("sources"), dict) else {}
+        eda = summary.get("eda", {}) if isinstance(summary.get("eda"), dict) else {}
+        annotation = summary.get("annotation", {}) if isinstance(summary.get("annotation"), dict) else {}
+        review = summary.get("review", {}) if isinstance(summary.get("review"), dict) else {}
+        approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
+        active_learning = summary.get("active_learning", {}) if isinstance(summary.get("active_learning"), dict) else {}
+        artifacts = summary.get("artifacts", {}) if isinstance(summary.get("artifacts"), dict) else {}
+
+        return [
+            {
+                "title": "Human-facing reports",
+                "items": [
+                    {"label": "Final report", "path": dashboard.get("final_report_path"), "note": "Главный markdown summary по текущему запуску."},
+                    {"label": "Source shortlist", "path": sources.get("source_report_path"), "note": "Shortlist источников и approval guidance."},
+                    {"label": "EDA markdown", "path": eda.get("eda_report_path"), "note": "Подробный EDA для README/demo narrative."},
+                    {"label": "EDA HTML", "path": eda.get("eda_html_report_path"), "note": "Наглядный HTML-отчёт для показа преподавателю."},
+                    {"label": "Annotation report", "path": annotation.get("annotation_report_path"), "note": "Сводка по effect labels и confidence."},
+                    {"label": "Annotation trace report", "path": annotation.get("annotation_trace_report_path"), "note": "Prompt/parser contract и fallback trace."},
+                    {"label": "Review guide", "path": review.get("review_queue_report_path"), "note": "Инструкция по HITL и объяснение следующего шага."},
+                    {"label": "Review merge report", "path": review.get("review_merge_report_path"), "note": "Результат ручного merge и post-review status."},
+                    {"label": "Active learning report", "path": active_learning.get("al_report_path"), "note": "История AL-итераций после review."},
+                ],
+            },
+            {
+                "title": "Human review files",
+                "items": [
+                    {"label": "Review queue CSV", "path": "data/interim/review_queue.csv", "note": "CSV для ручной проверки low-confidence строк."},
+                    {"label": "Review queue context", "path": review.get("review_queue_context_path"), "note": "Машиночитаемый контекст для reviewer tooling."},
+                    {"label": "Corrected queue CSV", "path": "data/interim/review_queue_corrected.csv", "note": "Заполняется человеком и подаётся обратно в pipeline.", "expected": True},
+                    {"label": "Review merge context", "path": review.get("review_merge_context_path"), "note": "Итог merge в JSON-виде для проверки согласованности."},
+                ],
+            },
+            {
+                "title": "Source and approval context",
+                "items": [
+                    {"label": "Discovered sources", "path": "data/raw/discovered_sources.json", "note": "Полный сериализованный shortlist discovery stage."},
+                    {"label": "Approval candidates", "path": "data/raw/approval_candidates.json", "note": "Упрощённый helper JSON для approval flow."},
+                    {"label": "Approved sources input", "path": approval.get("approved_sources_path"), "note": "Опциональный input-файл для ручного approval.", "expected": True},
+                ],
+            },
+            {
+                "title": "Model and machine-readable artifacts",
+                "items": [
+                    {"label": "EDA context", "path": eda.get("eda_context_path"), "note": "JSON summary для EDA/HITL layer."},
+                    {"label": "Annotation trace context", "path": annotation.get("annotation_trace_context_path"), "note": "JSON trace annotation contract."},
+                    {"label": "Model metrics", "path": artifacts.get("metrics_path"), "note": "Финальные метрики baseline-модели."},
+                    {"label": "Model artifact", "path": artifacts.get("model_path"), "note": "Сериализованный классификатор TF-IDF + LogReg."},
+                    {"label": "Vectorizer artifact", "path": artifacts.get("vectorizer_path"), "note": "Сериализованный TF-IDF vectorizer."},
+                ],
+            },
+        ]
+
+    def _render_dashboard_artifact_group(self, dashboard_path: str, group: dict[str, Any]) -> str:
+        """Render one grouped artifact block for the operator dashboard."""
+
+        items_html = "".join(
+            self._render_dashboard_artifact_item(dashboard_path, item)
+            for item in group.get("items", [])
+            if self._normalize_artifact_reference(item.get("path"))
+        )
+        return (
+            '<section class="artifact-group">'
+            f'<h3>{self._escape_html(group.get("title"))}</h3>'
+            f'<div class="artifact-list">{items_html}</div>'
+            "</section>"
+        )
+
+    def _render_dashboard_artifact_item(self, dashboard_path: str, item: dict[str, Any]) -> str:
+        """Render one linkable artifact row with readiness status."""
+
+        path = self._normalize_artifact_reference(item.get("path"))
+        note = self._normalize_text(item.get("note"))
+        expected = bool(item.get("expected"))
+        exists = self._artifact_reference_exists(path)
+        href = self._dashboard_href(dashboard_path, path)
+        status_label = "ready" if exists else ("expected input" if expected else "missing")
+        status_class = "artifact-status" if exists else "artifact-status expected"
+        label_html = (
+            f'<a href="{self._escape_html(href)}">{self._escape_html(item.get("label"))}</a>'
+            if href
+            else self._escape_html(item.get("label"))
+        )
+        return (
+            '<div class="artifact-item">'
+            f'<div>{label_html}</div>'
+            f'<div class="{status_class}">{self._escape_html(status_label)}</div>'
+            f'<div class="artifact-path">{self._escape_html(path)}</div>'
+            f'<div class="artifact-note">{self._escape_html(note)}</div>'
+            "</div>"
+        )
+
+    def _render_dashboard_link_tile(
+        self,
+        dashboard_path: str,
+        label: str,
+        path: Any,
+        description: str,
+        *,
+        expected: bool,
+    ) -> str:
+        """Render a prominent quick-link tile for the dashboard hero area."""
+
+        normalized_path = self._normalize_artifact_reference(path)
+        href = self._dashboard_href(dashboard_path, normalized_path)
+        if not normalized_path:
+            return ""
+
+        exists = self._artifact_reference_exists(normalized_path)
+        status_label = "ready" if exists else ("expected input" if expected else "missing")
+        return (
+            f'<a class="link-tile" href="{self._escape_html(href)}">'
+            f'<div class="title">{self._escape_html(label)}</div>'
+            f'<div class="path">{self._escape_html(normalized_path)}</div>'
+            f'<div class="description">{self._escape_html(description)}</div>'
+            f'<div class="artifact-status{" expected" if not exists else ""}" style="margin-top: 12px;">{self._escape_html(status_label)}</div>'
+            "</a>"
+        )
 
     def _format_compact_metadata(self, metadata: Any) -> str:
         """Render a short metadata summary that stays readable in markdown reports."""

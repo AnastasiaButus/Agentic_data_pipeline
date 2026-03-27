@@ -46,7 +46,9 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert (tmp_path / "final_report.md").exists()
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
     assert "## Runtime" in final_report
+    assert "## Dashboard" in final_report
     assert "effective_mode: offline_demo" in final_report
+    assert "dashboard_path: reports/run_dashboard.html" in final_report
     assert "## Approval" in final_report
     assert "## EDA" in final_report
     assert "## Annotation" in final_report
@@ -111,6 +113,12 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert "ручного просмотра и одобрения" in source_report
     assert "Fitness Supplements Offline Demo" in source_report
     assert "score:" in source_report
+    dashboard_html = (tmp_path / "reports" / "run_dashboard.html").read_text(encoding="utf-8")
+    assert "Pipeline Operator Dashboard" in dashboard_html
+    assert "effective_mode: offline_demo" in dashboard_html
+    assert "../final_report.md" in dashboard_html
+    assert "review_queue_report.md" in dashboard_html
+    assert "review_queue_corrected.csv" in dashboard_html
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert (tmp_path / "data" / "interim" / "model_metrics.json").exists()
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()

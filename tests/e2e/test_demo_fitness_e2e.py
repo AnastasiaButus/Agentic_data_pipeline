@@ -52,6 +52,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert (tmp_path / "final_report.md").exists()
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
     assert "## Approval" in final_report
+    assert "## Dashboard" in final_report
     assert "## EDA" in final_report
     assert "## Annotation" in final_report
     assert "eda_report_path" in final_report
@@ -98,6 +99,10 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert "Короткий shortlist источников" in source_report
     assert "ручного просмотра и одобрения" in source_report
     assert "Fitness Supplements Offline Demo" in source_report
+    dashboard_html = (tmp_path / "reports" / "run_dashboard.html").read_text(encoding="utf-8")
+    assert "Pipeline Operator Dashboard" in dashboard_html
+    assert "../final_report.md" in dashboard_html
+    assert "review_queue_corrected.csv" in dashboard_html
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert (tmp_path / "data" / "interim" / "model_metrics.json").exists()
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
@@ -106,6 +111,8 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert captured_report["summary"]["runtime"]["demo_sources_enabled"] is True
     assert captured_report["summary"]["runtime"]["remote_sources_enabled"] is False
     assert captured_report["summary"]["runtime"]["active_remote_source_types"] == []
+    assert captured_report["summary"]["dashboard"]["dashboard_path"] == "reports/run_dashboard.html"
+    assert captured_report["summary"]["dashboard"]["final_report_path"] == "final_report.md"
     assert captured_report["summary"]["approval"]["approval_status"] == "skipped_missing_file"
     assert Path(captured_report["summary"]["annotation"]["annotation_trace_report_path"]).as_posix() == "reports/annotation_trace_report.md"
     assert Path(captured_report["summary"]["annotation"]["annotation_trace_context_path"]).as_posix() == "data/interim/annotation_trace.json"

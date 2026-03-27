@@ -176,63 +176,78 @@ class PipelineController:
         al_report_path = self.reporting_service.write_al_report(al_history)
 
         artifacts, training_metrics = self.training_service.train(al_labeled)
-
-        final_report_path = self.reporting_service.write_final_report(
-            {
-                "runtime": runtime_summary,
-                "sources": {
-                    "n_candidates": len(sources),
-                    "source_report_path": source_report_path,
-                },
-                "quality": {
-                    "quality_report_path": quality_report_path,
-                    "warnings": getattr(quality_report, "warnings", []),
-                },
-                "eda": {
-                    "eda_report_path": eda_report_path,
-                    "eda_html_report_path": eda_html_report_path,
-                    "eda_context_path": eda_context_path,
-                    "n_rows": len(self._to_records(cleaned)),
-                },
-                "annotation": {
-                    "annotation_report_path": annotation_report_path,
-                    "annotation_trace_report_path": annotation_trace_report_path,
-                    "annotation_trace_context_path": annotation_trace_context_path,
-                    "confidence_threshold": annotation_summary.get("confidence_threshold"),
-                    "n_low_confidence": annotation_summary.get("n_low_confidence"),
-                },
-                "review": {
-                    "status": review_status,
-                    "review_queue_rows": review_queue_rows,
-                    "review_required": review_required,
-                    "reviewer_action": (
-                        "fill data/interim/review_queue_corrected.csv and rerun pipeline"
-                        if review_required and corrected_queue is None
-                        else "review queue already processed or not required"
-                    ),
-                    "next_step": (
-                        "human review rerun recommended before final retrain"
-                        if review_required and corrected_queue is None
-                        else "active learning and training completed for current run"
-                    ),
-                    "review_queue_report_path": review_queue_report_path,
-                    "review_queue_context_path": review_queue_context_path,
-                    "review_merge_report_path": review_merge_report_path,
-                    "review_merge_context_path": review_merge_context_path,
-                },
-                "approval": {
-                    "approved_sources_path": "data/raw/approved_sources.json",
-                    "n_approved_sources": len(approved_sources),
-                    "approval_status": approval_status,
-                },
-                "active_learning": {
-                    "al_report_path": al_report_path,
-                    "history": al_history,
-                },
-                "training": training_metrics,
-                "artifacts": artifacts,
-            }
+        reviewer_action = (
+            "fill data/interim/review_queue_corrected.csv and rerun pipeline"
+            if review_required and corrected_queue is None
+            else "review queue already processed or not required"
         )
+        next_step = (
+            "human review rerun recommended before final retrain"
+            if review_required and corrected_queue is None
+            else "active learning and training completed for current run"
+        )
+        dashboard_path = "reports/run_dashboard.html"
+        dashboard_status = "attention_required" if review_required and corrected_queue is None else "completed"
+        dashboard_stage = "human_review" if review_required and corrected_queue is None else "completed"
+        final_report_path = "final_report.md"
+
+        final_summary = {
+            "runtime": runtime_summary,
+            "dashboard": {
+                "dashboard_path": dashboard_path,
+                "final_report_path": final_report_path,
+                "pipeline_status": dashboard_status,
+                "current_stage": dashboard_stage,
+                "primary_action": reviewer_action,
+                "next_step": next_step,
+            },
+            "sources": {
+                "n_candidates": len(sources),
+                "source_report_path": source_report_path,
+            },
+            "quality": {
+                "quality_report_path": quality_report_path,
+                "warnings": getattr(quality_report, "warnings", []),
+            },
+            "eda": {
+                "eda_report_path": eda_report_path,
+                "eda_html_report_path": eda_html_report_path,
+                "eda_context_path": eda_context_path,
+                "n_rows": len(self._to_records(cleaned)),
+            },
+            "annotation": {
+                "annotation_report_path": annotation_report_path,
+                "annotation_trace_report_path": annotation_trace_report_path,
+                "annotation_trace_context_path": annotation_trace_context_path,
+                "confidence_threshold": annotation_summary.get("confidence_threshold"),
+                "n_low_confidence": annotation_summary.get("n_low_confidence"),
+            },
+            "review": {
+                "status": review_status,
+                "review_queue_rows": review_queue_rows,
+                "review_required": review_required,
+                "reviewer_action": reviewer_action,
+                "next_step": next_step,
+                "review_queue_report_path": review_queue_report_path,
+                "review_queue_context_path": review_queue_context_path,
+                "review_merge_report_path": review_merge_report_path,
+                "review_merge_context_path": review_merge_context_path,
+            },
+            "approval": {
+                "approved_sources_path": "data/raw/approved_sources.json",
+                "n_approved_sources": len(approved_sources),
+                "approval_status": approval_status,
+            },
+            "active_learning": {
+                "al_report_path": al_report_path,
+                "history": al_history,
+            },
+            "training": training_metrics,
+            "artifacts": artifacts,
+        }
+
+        final_report_path = self.reporting_service.write_final_report(final_summary)
+        dashboard_path = self.reporting_service.write_run_dashboard(final_summary)
 
         return {
             "sources": sources,
@@ -257,6 +272,7 @@ class PipelineController:
                 "review_merge_report": review_merge_report_path,
                 "review_merge_context": review_merge_context_path,
                 "al_report": al_report_path,
+                "dashboard": dashboard_path,
                 "final_report": final_report_path,
             },
             "review_status": review_status,

@@ -258,6 +258,7 @@ LLM используется только там, где он действите
 
 Успешный demo-run создаёт, например:
 
+- `reports/run_dashboard.html`
 - `final_report.md`
 - `data/raw/discovered_sources.json`
 - `data/raw/approval_candidates.json`
@@ -298,6 +299,12 @@ pip install -r requirements.txt
 python run_pipeline.py --config configs/demo_fitness.yaml
 python run_pipeline.py --config configs/demo_minecraft.yaml
 ```
+
+После запуска удобнее всего начинать просмотр с:
+
+- `reports/run_dashboard.html`
+- `final_report.md`
+- `reports/eda_report.html`
 
 ### Основная CLI-команда
 

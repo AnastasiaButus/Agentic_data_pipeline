@@ -150,3 +150,93 @@ def test_review_merge_report_explains_next_step(tmp_path: Path) -> None:
 
     assert "## Next step" in report
     assert "retrain / active learning" in report
+
+
+def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path) -> None:
+    """The operator dashboard should expose key artifacts from one HTML entry point."""
+
+    service = ReportingService(_make_context(tmp_path))
+    service.registry.save_markdown("final_report.md", "# Final Report\n")
+    service.registry.save_markdown("reports/source_report.md", "# Source Report\n")
+    service.registry.save_text("reports/eda_report.html", "<html><body>EDA</body></html>")
+    service.registry.save_markdown("reports/review_queue_report.md", "# Review Queue\n")
+    service.registry.save_markdown("reports/review_merge_report.md", "# Review Merge\n")
+    service.registry.save_json("data/interim/review_queue_context.json", {"current_stage": "human_review"})
+    service.registry.save_json("data/interim/review_merge_context.json", {"review_status": "skipped_missing_corrected_queue"})
+    service.registry.save_json("data/raw/approval_candidates.json", [{"source_id": "demo"}])
+    service.registry.save_json("data/raw/discovered_sources.json", [{"source_id": "demo"}])
+    service.registry.save_json("data/interim/eda_context.json", {"n_rows": 2})
+    service.registry.save_json("data/interim/annotation_trace.json", {"llm_mode": "classify_effect"})
+    service.registry.save_json("data/interim/model_metrics.json", {"accuracy": 1.0, "f1": 1.0})
+    service.registry.save_text("data/interim/review_queue.csv", "id\n1\n")
+
+    model_path = tmp_path / "data" / "interim" / "model_artifact.pkl"
+    vectorizer_path = tmp_path / "data" / "interim" / "vectorizer_artifact.pkl"
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    model_path.write_bytes(b"model")
+    vectorizer_path.write_bytes(b"vectorizer")
+
+    summary = {
+        "runtime": {
+            "requested_mode": "offline_demo",
+            "effective_mode": "offline_demo",
+            "demo_sources_enabled": True,
+            "configured_remote_source_types": ["hf_dataset"],
+            "active_remote_source_types": [],
+        },
+        "dashboard": {
+            "dashboard_path": "reports/run_dashboard.html",
+            "final_report_path": "final_report.md",
+            "pipeline_status": "attention_required",
+            "current_stage": "human_review",
+            "primary_action": "fill data/interim/review_queue_corrected.csv and rerun pipeline",
+            "next_step": "human review rerun recommended before final retrain",
+        },
+        "sources": {"n_candidates": 1, "source_report_path": "reports/source_report.md"},
+        "quality": {"warnings": ["duplicates removed"]},
+        "eda": {
+            "eda_report_path": "reports/eda_report.md",
+            "eda_html_report_path": "reports/eda_report.html",
+            "eda_context_path": "data/interim/eda_context.json",
+        },
+        "annotation": {
+            "annotation_report_path": "reports/annotation_report.md",
+            "annotation_trace_report_path": "reports/annotation_trace_report.md",
+            "annotation_trace_context_path": "data/interim/annotation_trace.json",
+            "confidence_threshold": 0.6,
+            "n_low_confidence": 1,
+        },
+        "review": {
+            "status": "skipped_missing_corrected_queue",
+            "review_queue_rows": 1,
+            "review_required": True,
+            "review_queue_report_path": "reports/review_queue_report.md",
+            "review_queue_context_path": "data/interim/review_queue_context.json",
+            "review_merge_report_path": "reports/review_merge_report.md",
+            "review_merge_context_path": "data/interim/review_merge_context.json",
+            "next_step": "human review rerun recommended before final retrain",
+        },
+        "approval": {
+            "approved_sources_path": "data/raw/approved_sources.json",
+            "approval_status": "skipped_missing_file",
+        },
+        "active_learning": {"al_report_path": "reports/al_report.md"},
+        "training": {"accuracy": 1.0, "f1": 1.0},
+        "artifacts": {
+            "metrics_path": str(tmp_path / "data" / "interim" / "model_metrics.json"),
+            "model_path": str(model_path),
+            "vectorizer_path": str(vectorizer_path),
+        },
+    }
+
+    dashboard_path = service.write_run_dashboard(summary)
+    html = (tmp_path / dashboard_path).read_text(encoding="utf-8")
+
+    assert "Pipeline Operator Dashboard" in html
+    assert "effective_mode: offline_demo" in html
+    assert 'href="../final_report.md"' in html
+    assert 'href="eda_report.html"' in html
+    assert "../data/interim/model_artifact.pkl" in html
+    assert "Corrected queue CSV" in html
+    assert "expected input" in html
+    assert "needs action" in html

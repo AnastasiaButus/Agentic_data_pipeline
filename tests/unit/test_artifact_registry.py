@@ -107,3 +107,33 @@ def test_nested_directories_are_created_automatically(tmp_path: Path) -> None:
     registry.save_text("nested/a/b/output.txt", "hello")
 
     assert (tmp_path / "nested" / "a" / "b" / "output.txt").exists()
+
+
+def test_resolve_handles_relative_paths_under_root(tmp_path: Path) -> None:
+    """Relative artifact paths should resolve under the project root."""
+
+    registry = _make_registry(tmp_path)
+
+    resolved_path = registry._resolve("reports/summary.md")
+
+    assert resolved_path == tmp_path / "reports" / "summary.md"
+
+
+def test_resolve_blocks_path_traversal_outside_root(tmp_path: Path) -> None:
+    """Path traversal attempts should fail instead of escaping the project root."""
+
+    registry = _make_registry(tmp_path)
+
+    with pytest.raises(ValueError, match="escapes project root"):
+        registry._resolve("../outside.txt")
+
+
+def test_resolve_accepts_absolute_paths_inside_root(tmp_path: Path) -> None:
+    """Absolute paths already inside the root should resolve predictably to the same artifact."""
+
+    registry = _make_registry(tmp_path)
+    absolute_path = tmp_path / "data" / "interim" / "artifact.json"
+
+    resolved_path = registry._resolve(absolute_path)
+
+    assert resolved_path == absolute_path.resolve(strict=False)

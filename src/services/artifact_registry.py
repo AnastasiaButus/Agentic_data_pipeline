@@ -87,12 +87,26 @@ class ArtifactRegistry:
         return self._resolve(path).exists()
 
     def _resolve(self, path: str | Path) -> Path:
-        """Resolve a user-supplied path relative to the project root."""
+        """Resolve a user-supplied path under the project root and reject escapes.
 
+        Absolute paths are allowed only when they already point inside the project root.
+        Relative paths are anchored to the root and normalized before the containment check.
+        """
+
+        root_path = self.root_dir.resolve(strict=False)
         candidate_path = Path(path)
+
         if candidate_path.is_absolute():
-            candidate_path = Path(*candidate_path.parts[1:])
-        return self.root_dir / candidate_path
+            resolved_path = candidate_path.resolve(strict=False)
+        else:
+            resolved_path = (root_path / candidate_path).resolve(strict=False)
+
+        try:
+            resolved_path.relative_to(root_path)
+        except ValueError as exc:
+            raise ValueError(f"Artifact path escapes project root: {path}") from exc
+
+        return resolved_path
 
     def _require_exists(self, path: Path) -> None:
         """Raise a clear, testable error for missing artifacts."""

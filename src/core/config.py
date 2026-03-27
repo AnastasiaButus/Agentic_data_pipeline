@@ -48,7 +48,7 @@ class SourceConfig:
 
 @dataclass(slots=True)
 class AnnotationConfig:
-    """Annotation defaults and output field names for review labeling."""
+    """Annotation defaults, provider selection, and output field names for review labeling."""
 
     use_llm: bool = False
     llm_provider: str = ""

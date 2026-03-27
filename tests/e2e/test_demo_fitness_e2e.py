@@ -24,6 +24,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     loaded_config = load_config(runtime_config_path)
     assert loaded_config.request.topic == "fitness supplements"
     assert loaded_config.annotation.use_llm is True
+    assert loaded_config.annotation.llm_provider == "mock"
 
     from src.services import reporting_service as reporting_module
 
@@ -76,6 +77,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     annotation_trace_context = json.loads((tmp_path / "data" / "interim" / "annotation_trace.json").read_text(encoding="utf-8"))
     assert "prompt_contract" in annotation_trace_context
     assert "parser_contract" in annotation_trace_context
+    assert annotation_trace_context["llm_mode"] == "classify_effect"
     assert annotation_trace_context["n_rows"] >= 0
     eda_report = (tmp_path / "reports" / "eda_report.md").read_text(encoding="utf-8")
     assert "EDA-пакет" in eda_report

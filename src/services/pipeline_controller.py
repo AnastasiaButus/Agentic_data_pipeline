@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from typing import Any
+import os
 
 from src.agents.active_learning_agent import ActiveLearningAgent
 from src.agents.annotation_agent import AnnotationAgent
 from src.agents.data_collection_agent import DataCollectionAgent
 from src.agents.data_quality_agent import DataQualityAgent
 from src.core.context import PipelineContext
+from src.providers.llm.gemini_client import GeminiClient
 from src.providers.llm.mock_llm import MockLLM
 from src.services.review_queue_service import CORRECTED_QUEUE_PATH, ReviewQueueService
 from src.services.reporting_service import ReportingService
@@ -40,14 +42,32 @@ class PipelineController:
         if annotation_agent is not None:
             self.annotation_agent = annotation_agent
         else:
-            use_llm = bool(getattr(getattr(ctx.config, "annotation", None), "use_llm", False))
-            # Demo runs stay offline by default; MockLLM is only enabled when the config opts in.
-            llm_client = MockLLM() if use_llm else None
+            llm_client = self._build_annotation_llm_client()
             self.annotation_agent = AnnotationAgent(ctx, llm_client=llm_client)
         self.review_queue_service = review_queue_service if review_queue_service is not None else ReviewQueueService(ctx)
         self.active_learning_agent = active_learning_agent if active_learning_agent is not None else ActiveLearningAgent(ctx)
         self.training_service = training_service if training_service is not None else TrainingService(ctx)
         self.reporting_service = reporting_service if reporting_service is not None else ReportingService(ctx)
+
+    def _build_annotation_llm_client(self) -> Any | None:
+        """Select the annotation provider explicitly from config while keeping the offline baseline stable."""
+
+        annotation_config = getattr(self.ctx.config, "annotation", None)
+        use_llm = bool(getattr(annotation_config, "use_llm", False))
+        if not use_llm:
+            return None
+
+        provider = str(getattr(annotation_config, "llm_provider", "") or "").strip().lower()
+        if provider in {"", "mock"}:
+            return MockLLM()
+
+        if provider == "gemini":
+            gemini_api_key = os.getenv("GEMINI_API_KEY")
+            if gemini_api_key:
+                return GeminiClient(api_key=gemini_api_key)
+            return MockLLM()
+
+        return MockLLM()
 
     def run(self) -> dict[str, Any]:
         """Execute the pipeline end-to-end and return a compact run summary."""

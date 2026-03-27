@@ -42,6 +42,8 @@ After auto-annotation, the pipeline also writes `data/interim/review_queue.csv` 
 
 The annotation stage also writes a compact Russian annotation trace pack: `reports/annotation_trace_report.md` and `data/interim/annotation_trace.json`. It records the prompt contract, the expected output fields, and the parser/fallback behavior used for auto-labeling. This is a reporting artifact layer, not a real API client.
 
+The online Gemini path is opt-in and intentionally narrow. Set `annotation.use_llm=true`, `annotation.llm_provider: gemini`, and `GEMINI_API_KEY` to use the Gemini Developer API for annotation. Without that config, or if the key is missing, the pipeline stays on the offline MockLLM path. This is not documented as a production-ready integration.
+
 The corrected review queue is still edited by a human separately in `data/interim/review_queue_corrected.csv`.
 
 If a corrected queue is present, the pipeline also writes `reports/review_merge_report.md` and `data/interim/review_merge_context.json` so the human merge step is visible and auditable. This is still an MVP, not a UI.

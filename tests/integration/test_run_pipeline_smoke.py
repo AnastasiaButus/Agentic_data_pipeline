@@ -8,6 +8,15 @@ from pathlib import Path
 from src.core.config import load_config
 
 
+def _runtime_config_text(template_text: str, tmp_path: Path, provider: str) -> str:
+    """Materialize a local runtime config while overriding the annotation provider flag."""
+
+    return (
+        template_text.replace("root_dir: .", f"root_dir: {tmp_path.as_posix()}")
+        .replace("llm_provider: mock", f"llm_provider: {provider}")
+    )
+
+
 def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> None:
     """The CLI should run end-to-end on the persistent fitness demo config without monkeypatch."""
 
@@ -26,6 +35,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     loaded_config = load_config(config_path)
     assert loaded_config.request.topic == "fitness supplements"
     assert loaded_config.annotation.use_llm is True
+    assert loaded_config.annotation.llm_provider == "mock"
 
     from run_pipeline import main
 
@@ -60,6 +70,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     annotation_trace_context = json.loads((tmp_path / "data" / "interim" / "annotation_trace.json").read_text(encoding="utf-8"))
     assert "prompt_contract" in annotation_trace_context
     assert "parser_contract" in annotation_trace_context
+    assert annotation_trace_context["llm_mode"] == "classify_effect"
     assert annotation_trace_context["n_rows"] >= 0
     eda_report = (tmp_path / "reports" / "eda_report.md").read_text(encoding="utf-8")
     assert "EDA-пакет" in eda_report
@@ -228,6 +239,173 @@ def test_eda_pack_handles_empty_quality_output(monkeypatch, tmp_path: Path) -> N
     assert eda_context["text_length_summary"]["available"] is False
     assert "eda_report_path" in final_report
     assert "eda_context_path" in final_report
+
+
+def test_run_pipeline_smoke_uses_gemini_provider_when_api_key_present(monkeypatch, tmp_path: Path) -> None:
+    """When the API key is present, the controller should use the Gemini provider path."""
+
+    import pandas as pd
+
+    from src.domain import SourceCandidate
+    from src.providers.llm.gemini_client import GeminiClient
+    from src.providers.llm.mock_llm import MockLLM
+    from src.services import source_discovery_service as discovery_module
+    from src.agents import data_collection_agent as data_collection_module
+
+    repo_root = Path(__file__).resolve().parents[2]
+    template_path = repo_root / "configs" / "demo_fitness.yaml"
+    template_text = template_path.read_text(encoding="utf-8")
+
+    config_path = tmp_path / "demo_fitness.runtime.yaml"
+    config_path.write_text(_runtime_config_text(template_text, tmp_path, "gemini"), encoding="utf-8")
+
+    loaded_config = load_config(config_path)
+    assert loaded_config.annotation.use_llm is True
+    assert loaded_config.annotation.llm_provider == "gemini"
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    monkeypatch.setattr(MockLLM, "classify_effect", lambda self, text, labels: (_ for _ in ()).throw(AssertionError("MockLLM must not be used when GEMINI_API_KEY is present")))
+    monkeypatch.setattr(
+        GeminiClient,
+        "generate",
+        lambda self, prompt: '{"effect_label": "energy", "sentiment_label": "positive", "confidence": 0.88}',
+    )
+
+    monkeypatch.setattr(
+        discovery_module.SourceDiscoveryService,
+        "run",
+        lambda self: [
+            SourceCandidate(
+                "demo_fitness_scrape",
+                "offline_demo",
+                "Fitness Supplements Offline Demo",
+                "demo_fitness_scrape",
+                score=1.0,
+                metadata={"web_url": "local://demo"},
+            )
+        ],
+    )
+
+    def fake_collect(self, sources):
+        return pd.DataFrame(
+            [
+                {
+                    "id": "1",
+                    "source": "demo",
+                    "text": "This supplement gives me more energy.",
+                    "label": None,
+                    "rating": 5,
+                    "created_at": "now",
+                    "split": None,
+                    "meta_json": "{}",
+                    "sentiment_label": None,
+                    "effect_label": "energy",
+                    "confidence": 1.0,
+                }
+            ]
+        )
+
+    monkeypatch.setattr(data_collection_module.DataCollectionAgent, "run", fake_collect)
+
+    from src.services import training_service as training_module
+
+    monkeypatch.setattr(
+        training_module.TrainingService,
+        "train",
+        lambda self, df: (
+            {
+                "model_path": str(tmp_path / "model.pkl"),
+                "vectorizer_path": str(tmp_path / "vectorizer.pkl"),
+                "metrics_path": str(tmp_path / "metrics.json"),
+            },
+            {"accuracy": 1.0, "f1": 1.0},
+        ),
+    )
+
+    from src.services import reporting_service as reporting_module
+
+    captured_report: dict[str, object] = {}
+    original_write_final_report = reporting_module.ReportingService.write_final_report
+
+    def capture_final_report(self, summary):
+        captured_report["summary"] = summary
+        return original_write_final_report(self, summary)
+
+    monkeypatch.setattr(reporting_module.ReportingService, "write_final_report", capture_final_report)
+
+    from run_pipeline import main
+
+    exit_code = main(["--config", str(config_path)])
+
+    assert exit_code == 0
+    annotation_trace_context = json.loads((tmp_path / "data" / "interim" / "annotation_trace.json").read_text(encoding="utf-8"))
+    assert annotation_trace_context["llm_mode"] == "generate_parse"
+    assert annotation_trace_context["n_fallback_rows"] == 0
+    assert annotation_trace_context["parser_contract"]["parse_status_counts"]["parsed"] == 1
+    assert Path(captured_report["summary"]["annotation"]["annotation_trace_context_path"]).as_posix() == "data/interim/annotation_trace.json"
+
+
+def test_run_pipeline_smoke_uses_mock_provider_when_api_key_present(monkeypatch, tmp_path: Path) -> None:
+    """An explicit mock provider should ignore GEMINI_API_KEY and stay on the offline path."""
+
+    from src.providers.llm.gemini_client import GeminiClient
+
+    repo_root = Path(__file__).resolve().parents[2]
+    template_path = repo_root / "configs" / "demo_fitness.yaml"
+    template_text = template_path.read_text(encoding="utf-8")
+
+    config_path = tmp_path / "demo_fitness.runtime.yaml"
+    config_path.write_text(_runtime_config_text(template_text, tmp_path, "mock"), encoding="utf-8")
+
+    loaded_config = load_config(config_path)
+    assert loaded_config.annotation.use_llm is True
+    assert loaded_config.annotation.llm_provider == "mock"
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        GeminiClient,
+        "generate",
+        lambda self, prompt: (_ for _ in ()).throw(AssertionError("GeminiClient must not be used when llm_provider is mock")),
+    )
+
+    from run_pipeline import main
+
+    exit_code = main(["--config", str(config_path)])
+
+    assert exit_code == 0
+    annotation_trace_context = json.loads((tmp_path / "data" / "interim" / "annotation_trace.json").read_text(encoding="utf-8"))
+    assert annotation_trace_context["llm_mode"] == "classify_effect"
+    assert annotation_trace_context["n_fallback_rows"] == 0
+
+
+def test_run_pipeline_smoke_falls_back_to_mock_when_gemini_key_missing(monkeypatch, tmp_path: Path) -> None:
+    """A Gemini provider without a key should fall back safely to MockLLM."""
+
+    from src.providers.llm.gemini_client import GeminiClient
+
+    repo_root = Path(__file__).resolve().parents[2]
+    template_path = repo_root / "configs" / "demo_fitness.yaml"
+    template_text = template_path.read_text(encoding="utf-8")
+
+    config_path = tmp_path / "demo_fitness.runtime.yaml"
+    config_path.write_text(_runtime_config_text(template_text, tmp_path, "gemini"), encoding="utf-8")
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        GeminiClient,
+        "generate",
+        lambda self, prompt: (_ for _ in ()).throw(AssertionError("GeminiClient must not be called without GEMINI_API_KEY")),
+    )
+
+    from run_pipeline import main
+
+    exit_code = main(["--config", str(config_path)])
+
+    assert exit_code == 0
+    annotation_trace_context = json.loads((tmp_path / "data" / "interim" / "annotation_trace.json").read_text(encoding="utf-8"))
+    assert annotation_trace_context["llm_mode"] == "classify_effect"
+    assert annotation_trace_context["n_fallback_rows"] == 0
 
 
 def test_run_pipeline_smoke_uses_only_approved_sources_when_approval_file_exists(monkeypatch, tmp_path: Path) -> None:

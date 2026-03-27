@@ -143,9 +143,12 @@ class SourceDiscoveryService:
         except Exception:
             return []
 
-        items = response.get("items") if isinstance(response, dict) else None
-        if items is None:
-            items = [response]
+        if not isinstance(response, dict):
+            return []
+
+        items = response.get("items")
+        if not isinstance(items, list):
+            return []
 
         candidates: list[SourceCandidate] = []
         for item in items:

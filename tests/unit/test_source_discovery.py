@@ -201,6 +201,25 @@ def test_search_github_repos_failure_falls_back_safely(monkeypatch, tmp_path: Pa
     assert service.search_github_repos() == []
 
 
+def test_search_github_repos_invalid_items_payload_returns_empty_list(monkeypatch, tmp_path: Path) -> None:
+    """Malformed GitHub payloads should return an empty shortlist without raising."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
+    service = SourceDiscoveryService(context)
+
+    payloads = [
+        {},
+        {"items": None},
+        {"items": "not-a-list"},
+    ]
+
+    for payload in payloads:
+        monkeypatch.setattr(service, "_fetch_github_repositories", lambda topic, p=payload: p)
+        assert service.search_github_repos() == []
+
+
 def test_internal_api_candidates_use_api_source_type(tmp_path: Path) -> None:
     """Internal API discovery should keep the generic api source type and mark kind in metadata."""
 

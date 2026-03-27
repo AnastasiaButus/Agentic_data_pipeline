@@ -10,6 +10,7 @@ from src.agents.annotation_agent import AnnotationAgent
 from src.agents.data_collection_agent import DataCollectionAgent
 from src.agents.data_quality_agent import DataQualityAgent
 from src.core.context import PipelineContext
+from src.core.runtime import build_runtime_summary
 from src.providers.llm.gemini_client import GeminiClient
 from src.providers.llm.mock_llm import MockLLM
 from src.services.review_queue_service import CORRECTED_QUEUE_PATH, ReviewQueueService
@@ -72,6 +73,7 @@ class PipelineController:
     def run(self) -> dict[str, Any]:
         """Execute the pipeline end-to-end and return a compact run summary."""
 
+        runtime_summary = build_runtime_summary(self.ctx.config)
         sources = self.discovery_service.run()
         source_report_path = self.reporting_service.write_source_report(sources)
 
@@ -177,6 +179,7 @@ class PipelineController:
 
         final_report_path = self.reporting_service.write_final_report(
             {
+                "runtime": runtime_summary,
                 "sources": {
                     "n_candidates": len(sources),
                     "source_report_path": source_report_path,
@@ -259,6 +262,7 @@ class PipelineController:
             "review_status": review_status,
             "approved_sources": approved_sources,
             "approval_status": approval_status,
+            "runtime_mode": runtime_summary["effective_mode"],
         }
 
     def _to_records(self, df: Any) -> list[dict[str, Any]]:

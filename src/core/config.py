@@ -89,6 +89,13 @@ class TrainingConfig:
 
 
 @dataclass(slots=True)
+class RuntimeConfig:
+    """Top-level runtime mode selection for offline/online execution."""
+
+    mode: str = ""
+
+
+@dataclass(slots=True)
 class AppConfig:
     """Aggregate configuration for the full pipeline runtime."""
 
@@ -99,6 +106,7 @@ class AppConfig:
     quality: QualityConfig = field(default_factory=QualityConfig)
     active_learning: ActiveLearningConfig = field(default_factory=ActiveLearningConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -119,6 +127,17 @@ def load_config(path: str | Path) -> AppConfig:
     request_data = _require_section(raw_config, "request")
     source_data = _require_section(raw_config, "source")
     annotation_data = _require_section(raw_config, "annotation")
+    runtime_data = raw_config.get("runtime", {})
+    if runtime_data is not None and not isinstance(runtime_data, dict):
+        raise ConfigError("Section 'runtime' must be a mapping")
+
+    runtime_config = _build_config(RuntimeConfig, runtime_data)
+    try:
+        from src.core.runtime import validate_runtime_mode
+
+        runtime_config.mode = validate_runtime_mode(runtime_config.mode)
+    except ValueError as exc:
+        raise ConfigError(str(exc).replace("runtime.mode", "runtime.mode")) from exc
 
     return AppConfig(
         project=_build_config(
@@ -140,6 +159,7 @@ def load_config(path: str | Path) -> AppConfig:
             raw_config.get("active_learning", {}),
         ),
         training=_build_config(TrainingConfig, raw_config.get("training", {})),
+        runtime=runtime_config,
     )
 
 

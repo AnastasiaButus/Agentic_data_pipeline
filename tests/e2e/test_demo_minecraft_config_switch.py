@@ -25,6 +25,7 @@ def test_demo_minecraft_config_switch_runs_end_to_end(tmp_path: Path) -> None:
     loaded_config = load_config(runtime_config_path)
     assert loaded_config.request.topic == "minecraft instructions"
     assert loaded_config.annotation.use_llm is True
+    assert loaded_config.runtime.mode == "offline_demo"
 
     from run_pipeline import main
 

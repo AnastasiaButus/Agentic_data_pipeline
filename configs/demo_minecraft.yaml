@@ -38,3 +38,6 @@ annotation:
     - crafting
     - combat
     - enchantments
+
+runtime:
+  mode: offline_demo

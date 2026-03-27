@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from src.core.context import PipelineContext
+from src.core.runtime import (
+    demo_key_for_config,
+    runtime_allows_demo_sources,
+    runtime_allows_remote_sources,
+)
 from src.domain import SourceCandidate
 from src.services.artifact_registry import ArtifactRegistry
 
@@ -26,18 +31,11 @@ class SourceDiscoveryService:
     def search_huggingface(self) -> list[SourceCandidate]:
         """Return Hugging Face dataset candidates, preferring the real search path when possible."""
 
-        demo_key = self._demo_key()
-        if demo_key == "fitness":
-            return [
-                SourceCandidate(
-                    source_id="hf_fitness_supplements_reviews",
-                    source_type="hf_dataset",
-                    title="Fitness Supplements Reviews Dataset",
-                    uri="fitness-supplements/reviews",
-                    score=0.95,
-                    metadata={"domain": "fitness_supplements", "source_kind": "dataset"},
-                )
-            ]
+        source_config = getattr(getattr(self.ctx, "config", None), "source", None)
+        if not bool(getattr(source_config, "use_huggingface", False)):
+            return []
+        if not runtime_allows_remote_sources(self.ctx.config):
+            return []
 
         return self.search_huggingface_real()
 
@@ -97,6 +95,9 @@ class SourceDiscoveryService:
     def search_internal_apis(self) -> list[SourceCandidate]:
         """Return deterministic candidates for hidden or internal APIs."""
 
+        source_config = getattr(getattr(self.ctx, "config", None), "source", None)
+        if not bool(getattr(source_config, "use_internal_api", False)):
+            return []
         if self._demo_key() is None:
             return []
 
@@ -114,6 +115,9 @@ class SourceDiscoveryService:
     def search_public_apis(self) -> list[SourceCandidate]:
         """Return deterministic candidates for public APIs."""
 
+        source_config = getattr(getattr(self.ctx, "config", None), "source", None)
+        if not bool(getattr(source_config, "use_public_api", False)):
+            return []
         if self._demo_key() is None:
             return []
 
@@ -131,6 +135,11 @@ class SourceDiscoveryService:
     def search_github_repos(self) -> list[SourceCandidate]:
         """Search GitHub repositories for the current topic and map results to candidates."""
 
+        source_config = getattr(getattr(self.ctx, "config", None), "source", None)
+        if not bool(getattr(source_config, "use_github_search", False)):
+            return []
+        if not runtime_allows_remote_sources(self.ctx.config):
+            return []
         topic = str(getattr(self.ctx.config.request, "topic", "")).strip()
         if not topic:
             return []
@@ -191,6 +200,9 @@ class SourceDiscoveryService:
     def search_web_pages_for_scraping(self) -> list[SourceCandidate]:
         """Return a deterministic scraping fallback candidate without implementing scraping."""
 
+        source_config = getattr(getattr(self.ctx, "config", None), "source", None)
+        if not bool(getattr(source_config, "use_scraping_fallback", False)):
+            return []
         if self._demo_key() is None:
             return []
 
@@ -219,19 +231,21 @@ class SourceDiscoveryService:
     def run(self) -> list[SourceCandidate]:
         """Run discovery, rank the results, and persist the serialized output."""
 
-        demo_candidates = self._demo_candidates()
-        if demo_candidates:
-            self.registry.save_json("data/raw/discovered_sources.json", [candidate.as_dict() for candidate in demo_candidates])
-            return demo_candidates
+        candidates: list[SourceCandidate] = []
+        if runtime_allows_demo_sources(self.ctx.config):
+            candidates.extend(self._demo_candidates())
 
-        candidates = (
-            self.search_huggingface()
-            + self.search_internal_apis()
-            + self.search_public_apis()
-            + self.search_github_repos()
-            + self.search_web_pages_for_scraping()
-        )
+        if runtime_allows_remote_sources(self.ctx.config):
+            candidates.extend(
+                self.search_huggingface()
+                + self.search_internal_apis()
+                + self.search_public_apis()
+                + self.search_github_repos()
+                + self.search_web_pages_for_scraping()
+            )
+
         ranked = self.rank_candidates(candidates)
+        ranked = self._limit_candidates(ranked)
         self.registry.save_json("data/raw/discovered_sources.json", [candidate.as_dict() for candidate in ranked])
         return ranked
 
@@ -325,16 +339,16 @@ class SourceDiscoveryService:
     def _demo_key(self) -> str | None:
         """Map the active config to a known offline demo payload when appropriate."""
 
-        project = getattr(self.ctx, "config", None)
-        project_name = str(getattr(getattr(project, "project", None), "name", ""))
+        return demo_key_for_config(self.ctx.config)
 
-        # Demo mode is now keyed only by explicit project identity so future real-run
-        # configs that reuse the same topic cannot accidentally enter the offline path.
-        if project_name == "universal-agentic-data-pipeline-fitness-demo":
-            return "fitness"
-        if project_name == "universal-agentic-data-pipeline-minecraft-demo":
-            return "minecraft"
-        return None
+    def _limit_candidates(self, candidates: list[SourceCandidate]) -> list[SourceCandidate]:
+        """Apply the configured shortlist cap after ranking."""
+
+        source_config = getattr(getattr(self.ctx, "config", None), "source", None)
+        max_sources = int(getattr(source_config, "max_sources", 0) or 0)
+        if max_sources <= 0:
+            return list(candidates)
+        return list(candidates[:max_sources])
 
     def _fetch_huggingface_datasets(self, topic: str) -> dict[str, Any]:
         """Fetch the Hugging Face datasets search payload for a topic.

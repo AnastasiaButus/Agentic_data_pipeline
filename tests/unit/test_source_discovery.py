@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, SourceConfig
+from src.core.config import AnnotationConfig, AppConfig, ProjectConfig, RuntimeConfig, SourceConfig
 from src.core.context import PipelineContext
 from src.domain import SourceCandidate
 from src.services.source_discovery_service import SourceDiscoveryService
@@ -94,6 +94,7 @@ def test_search_github_repos_transforms_response_to_candidates(monkeypatch, tmp_
 
     context = _make_context(tmp_path)
     context.config.project.name = "non-demo"
+    context.config.source.use_github_search = True
     context.config.request.topic = "fitness supplements"
     service = SourceDiscoveryService(context)
 
@@ -143,6 +144,7 @@ def test_search_github_repos_uses_topic_from_request_config(monkeypatch, tmp_pat
 
     context = _make_context(tmp_path)
     context.config.project.name = "non-demo"
+    context.config.source.use_github_search = True
     context.config.request.topic = "fitness supplements reviews"
 
     service = SourceDiscoveryService(context)
@@ -193,6 +195,7 @@ def test_search_github_repos_failure_falls_back_safely(monkeypatch, tmp_path: Pa
 
     context = _make_context(tmp_path)
     context.config.project.name = "non-demo"
+    context.config.source.use_github_search = True
     context.config.request.topic = "fitness supplements"
     service = SourceDiscoveryService(context)
 
@@ -206,6 +209,7 @@ def test_search_github_repos_invalid_items_payload_returns_empty_list(monkeypatc
 
     context = _make_context(tmp_path)
     context.config.project.name = "non-demo"
+    context.config.source.use_github_search = True
     context.config.request.topic = "fitness supplements"
     service = SourceDiscoveryService(context)
 
@@ -225,6 +229,7 @@ def test_search_github_repos_rate_limit_like_payload_returns_empty_list(monkeypa
 
     context = _make_context(tmp_path)
     context.config.project.name = "non-demo"
+    context.config.source.use_github_search = True
     context.config.request.topic = "fitness supplements"
     service = SourceDiscoveryService(context)
 
@@ -246,7 +251,7 @@ def test_internal_api_candidates_use_api_source_type(tmp_path: Path) -> None:
 
     config = AppConfig(
         project=ProjectConfig(name="universal-agentic-data-pipeline-fitness-demo", root_dir=tmp_path),
-        source=SourceConfig(use_huggingface=True),
+        source=SourceConfig(use_huggingface=True, use_internal_api=True),
         annotation=AnnotationConfig(),
     )
     service = SourceDiscoveryService(PipelineContext.from_config(config))
@@ -261,6 +266,9 @@ def test_non_demo_stub_methods_return_empty_lists(tmp_path: Path) -> None:
 
     context = _make_context(tmp_path)
     context.config.project.name = "non-demo"
+    context.config.source.use_internal_api = True
+    context.config.source.use_public_api = True
+    context.config.source.use_scraping_fallback = True
     service = SourceDiscoveryService(context)
 
     assert service.search_internal_apis() == []
@@ -402,6 +410,7 @@ def test_non_demo_shortlist_can_include_hf_and_github_real_candidates(monkeypatc
 
     context = _make_context(tmp_path)
     context.config.project.name = "non-demo"
+    context.config.source.use_github_search = True
     context.config.request.topic = "fitness supplements"
     registry = FakeRegistry()
     service = SourceDiscoveryService(context, registry=registry)
@@ -472,6 +481,7 @@ def test_real_huggingface_path_failure_falls_back_safely(monkeypatch, tmp_path: 
 
     context = _make_context(tmp_path)
     context.config.project.name = "non-demo"
+    context.config.source.use_github_search = True
     context.config.request.topic = "fitness supplements"
     registry = FakeRegistry()
     service = SourceDiscoveryService(context, registry=registry)
@@ -485,3 +495,87 @@ def test_real_huggingface_path_failure_falls_back_safely(monkeypatch, tmp_path: 
     assert registry.saved is not None
     assert registry.saved[0] == "data/raw/discovered_sources.json"
     assert registry.saved[1] == []
+
+
+def test_explicit_online_mode_ignores_demo_project_and_uses_remote_search(monkeypatch, tmp_path: Path) -> None:
+    """Explicit online mode should bypass built-in demo candidates even on demo project names."""
+
+    config = AppConfig(
+        project=ProjectConfig(name="universal-agentic-data-pipeline-fitness-demo", root_dir=tmp_path),
+        source=SourceConfig(use_huggingface=True, use_github_search=False),
+        annotation=AnnotationConfig(),
+        runtime=RuntimeConfig(mode="online"),
+    )
+    context = PipelineContext.from_config(config)
+    context.config.request.topic = "fitness supplements"
+    registry = FakeRegistry()
+    service = SourceDiscoveryService(context, registry=registry)
+
+    monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: {
+        "datasets": [
+            {
+                "id": "fitness/supplements-reviews",
+                "title": "Fitness Supplements Reviews",
+                "downloads": 1234,
+                "likes": 56,
+                "tags": ["text-classification", "reviews"],
+            }
+        ]
+    })
+
+    discovered = service.run()
+
+    assert [candidate.source_type for candidate in discovered] == ["hf_dataset"]
+    assert discovered[0].source_id == "fitness/supplements-reviews"
+
+
+def test_local_only_mode_skips_remote_search_even_when_flags_are_enabled(monkeypatch, tmp_path: Path) -> None:
+    """Local-only mode should not call remote discovery helpers even when flags are on."""
+
+    config = AppConfig(
+        project=ProjectConfig(name="non-demo", root_dir=tmp_path),
+        source=SourceConfig(use_huggingface=True, use_github_search=True),
+        annotation=AnnotationConfig(),
+        runtime=RuntimeConfig(mode="local_only"),
+    )
+    context = PipelineContext.from_config(config)
+    context.config.request.topic = "fitness supplements"
+    registry = FakeRegistry()
+    service = SourceDiscoveryService(context, registry=registry)
+
+    monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: (_ for _ in ()).throw(AssertionError("HF fetch must not run in local_only mode")))
+    monkeypatch.setattr(service, "_fetch_github_repositories", lambda topic: (_ for _ in ()).throw(AssertionError("GitHub fetch must not run in local_only mode")))
+
+    discovered = service.run()
+
+    assert discovered == []
+    assert registry.saved is not None
+    assert registry.saved[1] == []
+
+
+def test_run_respects_source_flags_and_max_sources(monkeypatch, tmp_path: Path) -> None:
+    """Discovery should honor source flags and apply max_sources after ranking."""
+
+    config = AppConfig(
+        project=ProjectConfig(name="non-demo", root_dir=tmp_path),
+        source=SourceConfig(use_huggingface=True, use_github_search=False, max_sources=1),
+        annotation=AnnotationConfig(),
+        runtime=RuntimeConfig(mode="online"),
+    )
+    context = PipelineContext.from_config(config)
+    context.config.request.topic = "fitness supplements"
+    registry = FakeRegistry()
+    service = SourceDiscoveryService(context, registry=registry)
+
+    monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: {
+        "datasets": [
+            {"id": "dataset/one", "title": "Dataset One", "downloads": 100, "likes": 5, "tags": ["reviews"]},
+            {"id": "dataset/two", "title": "Dataset Two", "downloads": 90, "likes": 4, "tags": ["reviews"]},
+        ]
+    })
+    monkeypatch.setattr(service, "_fetch_github_repositories", lambda topic: (_ for _ in ()).throw(AssertionError("GitHub fetch must not run when use_github_search=false")))
+
+    discovered = service.run()
+
+    assert len(discovered) == 1
+    assert discovered[0].source_id == "dataset/one"

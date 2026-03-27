@@ -669,6 +669,7 @@ class ReportingService:
 
         lines = ["# Final Report", ""]
         section_titles = {
+            "runtime": "Runtime",
             "sources": "Sources",
             "quality": "Quality",
             "eda": "EDA",
@@ -679,7 +680,7 @@ class ReportingService:
             "training": "Training",
             "artifacts": "Artifacts",
         }
-        for section_name in ["sources", "quality", "eda", "annotation", "review", "approval", "active_learning", "training", "artifacts"]:
+        for section_name in ["runtime", "sources", "quality", "eda", "annotation", "review", "approval", "active_learning", "training", "artifacts"]:
             section = summary.get(section_name)
             lines.append(f"## {section_titles[section_name]}")
             lines.append("")

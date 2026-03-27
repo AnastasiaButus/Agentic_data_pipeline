@@ -51,6 +51,8 @@ annotation:
   label_field: sentiment
   id_field: review_id
   output_dir: null
+runtime:
+  mode: hybrid
 unknown_section:
   ignored: true
 """.strip(),
@@ -70,6 +72,7 @@ unknown_section:
         assert config.annotation.label_field == "sentiment"
         assert config.annotation.text_field == "review_text"
         assert config.annotation.llm_provider is None
+        assert config.runtime.mode == "hybrid"
         assert config.training.random_seed == 42
 
 
@@ -136,6 +139,8 @@ annotation:
   label_field: label
   id_field: id
   output_dir: null
+runtime:
+  mode: local_only
 """.strip(),
         encoding="utf-8",
     )
@@ -151,3 +156,28 @@ annotation:
     assert config.annotation.use_llm is True
     assert config.annotation.llm_provider is None
     assert config.annotation.effect_labels == ["boost", "neutral"]
+    assert config.runtime.mode == "local_only"
+
+
+def test_load_config_rejects_invalid_runtime_mode(tmp_path: Path) -> None:
+    """Unsupported runtime modes should fail fast during config loading."""
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+project:
+  name: fitness-demo
+request:
+  topic: fitness supplements
+source:
+  use_huggingface: true
+annotation:
+  use_llm: false
+runtime:
+  mode: spaceship
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="runtime.mode"):
+        load_config(config_path)

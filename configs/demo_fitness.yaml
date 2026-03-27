@@ -38,3 +38,6 @@ annotation:
     - energy
     - side_effects
     - other
+
+runtime:
+  mode: offline_demo

@@ -36,6 +36,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert loaded_config.request.topic == "fitness supplements"
     assert loaded_config.annotation.use_llm is True
     assert loaded_config.annotation.llm_provider == "mock"
+    assert loaded_config.runtime.mode == "offline_demo"
 
     from run_pipeline import main
 
@@ -44,6 +45,8 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert exit_code == 0
     assert (tmp_path / "final_report.md").exists()
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
+    assert "## Runtime" in final_report
+    assert "effective_mode: offline_demo" in final_report
     assert "## Approval" in final_report
     assert "## EDA" in final_report
     assert "## Annotation" in final_report

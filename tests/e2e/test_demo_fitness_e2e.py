@@ -25,6 +25,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert loaded_config.request.topic == "fitness supplements"
     assert loaded_config.annotation.use_llm is True
     assert loaded_config.annotation.llm_provider == "mock"
+    assert loaded_config.runtime.mode == "offline_demo"
 
     from src.services import reporting_service as reporting_module
 
@@ -81,7 +82,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert annotation_trace_context["n_rows"] >= 0
     eda_report = (tmp_path / "reports" / "eda_report.md").read_text(encoding="utf-8")
     assert "EDA-пакет" in eda_report
-    assert "Это краткий честный EDA-отчет" in eda_report
+    assert "Это расширенный честный EDA-отчет" in eda_report
     eda_context = json.loads((tmp_path / "data" / "interim" / "eda_context.json").read_text(encoding="utf-8"))
     assert "n_rows" in eda_context
     assert "columns" in eda_context
@@ -101,6 +102,10 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert (tmp_path / "data" / "interim" / "model_metrics.json").exists()
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert "Fitness Supplements Offline Demo" in (tmp_path / "data" / "raw" / "discovered_sources.json").read_text(encoding="utf-8")
+    assert captured_report["summary"]["runtime"]["effective_mode"] == "offline_demo"
+    assert captured_report["summary"]["runtime"]["demo_sources_enabled"] is True
+    assert captured_report["summary"]["runtime"]["remote_sources_enabled"] is False
+    assert captured_report["summary"]["runtime"]["active_remote_source_types"] == []
     assert captured_report["summary"]["approval"]["approval_status"] == "skipped_missing_file"
     assert Path(captured_report["summary"]["annotation"]["annotation_trace_report_path"]).as_posix() == "reports/annotation_trace_report.md"
     assert Path(captured_report["summary"]["annotation"]["annotation_trace_context_path"]).as_posix() == "data/interim/annotation_trace.json"

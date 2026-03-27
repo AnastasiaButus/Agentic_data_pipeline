@@ -213,6 +213,28 @@ def test_check_quality_uses_effect_labels_when_present(tmp_path: Path) -> None:
     assert report["n_low_confidence"] == 1
 
 
+def test_check_quality_uses_configured_default_label_when_other_is_absent(tmp_path: Path) -> None:
+    """When 'other' is missing, label_dist should fall back to the configured default label."""
+
+    effect_labels = ["crafting", "combat", "enchantments"]
+    agent = AnnotationAgent(_make_context_with_effect_labels(tmp_path, effect_labels), registry=FakeRegistry())
+
+    report = agent.check_quality(
+        _Frame(
+            [
+                {"id": "1", "source": "HF", "text": "Crafting guide", "label": None, "effect_label": "crafting", "confidence": 0.9, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+                {"id": "2", "source": "HF", "text": "Missing effect label", "label": None, "effect_label": "", "confidence": 0.4, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+                {"id": "3", "source": "HF", "text": "Another missing effect label", "label": None, "effect_label": None, "confidence": 0.8, "rating": None, "created_at": "now", "split": None, "meta_json": "{}"},
+            ]
+        )
+    )
+
+    assert "other" not in report["label_dist"]
+    assert report["label_dist"] == {"crafting": 1.0}
+    assert report["agreement"] is None
+    assert report["kappa"] is None
+
+
 def test_check_quality_empty_input_is_safe(tmp_path: Path) -> None:
     """Empty labeled input should return a safe zeroed summary."""
 

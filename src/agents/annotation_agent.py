@@ -124,13 +124,15 @@ class AnnotationAgent(BaseAgent):
         confidence_values: list[float] = []
         threshold = self._confidence_threshold()
         n_low_confidence = 0
+        effect_labels = self._effect_label_vocabulary()
+        fallback_label = self._fallback_effect_label(effect_labels)
         use_effect_labels = any(self._normalize_optional_label(row.get("effect_label")) for row in rows)
         auto_labels: list[str] = []
         human_labels: list[str] = []
 
         for row in rows:
             raw_label = row.get("effect_label") if use_effect_labels else row.get("label")
-            label = self._normalize_optional_label(raw_label) or "other"
+            label = self._normalize_optional_label(raw_label) or fallback_label
             label_counts[label] = label_counts.get(label, 0) + 1
 
             reviewed_label = self._normalize_optional_label(row.get("reviewed_effect_label"))

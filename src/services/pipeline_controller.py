@@ -10,7 +10,7 @@ from src.agents.data_collection_agent import DataCollectionAgent
 from src.agents.data_quality_agent import DataQualityAgent
 from src.core.context import PipelineContext
 from src.providers.llm.mock_llm import MockLLM
-from src.services.review_queue_service import ReviewQueueService
+from src.services.review_queue_service import CORRECTED_QUEUE_PATH, ReviewQueueService
 from src.services.reporting_service import ReportingService
 from src.services.source_discovery_service import SourceDiscoveryService
 from src.services.training_service import TrainingService
@@ -293,7 +293,7 @@ class PipelineController:
                 n_effect_label_changes += 1
 
         corrected_queue_found = corrected_queue is not None
-        corrected_queue_path = "data/interim/review_queue_corrected.csv"
+        corrected_queue_path = CORRECTED_QUEUE_PATH
 
         return {
             "corrected_queue_found": corrected_queue_found,

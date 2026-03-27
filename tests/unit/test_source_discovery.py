@@ -220,6 +220,27 @@ def test_search_github_repos_invalid_items_payload_returns_empty_list(monkeypatc
         assert service.search_github_repos() == []
 
 
+def test_search_github_repos_rate_limit_like_payload_returns_empty_list(monkeypatch, tmp_path: Path) -> None:
+    """GitHub error-like payloads should return an empty shortlist without raising."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    context.config.request.topic = "fitness supplements"
+    service = SourceDiscoveryService(context)
+
+    payloads = [
+        {"message": "API rate limit exceeded for 1.2.3.4"},
+        {
+            "message": "Requires authentication",
+            "documentation_url": "https://docs.github.com/rest/overview/resources-in-the-rest-api#rate-limiting",
+        },
+    ]
+
+    for payload in payloads:
+        monkeypatch.setattr(service, "_fetch_github_repositories", lambda topic, p=payload: p)
+        assert service.search_github_repos() == []
+
+
 def test_internal_api_candidates_use_api_source_type(tmp_path: Path) -> None:
     """Internal API discovery should keep the generic api source type and mark kind in metadata."""
 

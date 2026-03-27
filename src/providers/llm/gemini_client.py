@@ -160,16 +160,35 @@ class GeminiClient(BaseLLM):
     def _extract_effect_labels(self, prompt: str) -> list[str]:
         """Extract the effect-label vocabulary from the existing annotation prompt contract."""
 
+        patterns = [
+            r"^\s*Допустимые\s+effect_label:\s*(.+?)\s*$",
+            r"^\s*(?:Допустимые|Разрешенные|Разрешённые|Allowed)\s+effect_label(?:s)?\s*[:=]\s*(.+?)\s*$",
+            r"^\s*effect_label(?:s)?\s*(?:allowed|options|labels)?\s*[:=]\s*(.+?)\s*$",
+        ]
+
         for line in prompt.splitlines():
-            match = re.match(r"^\s*Допустимые effect_label:\s*(.+?)\s*$", line, flags=re.IGNORECASE)
-            if not match:
-                continue
-            raw_labels = match.group(1)
-            labels = [self._normalize_label(label) for label in raw_labels.split(",")]
-            cleaned = [label for label in labels if label]
-            if cleaned:
-                return cleaned
+            for pattern in patterns:
+                match = re.match(pattern, line, flags=re.IGNORECASE)
+                if not match:
+                    continue
+                cleaned = self._parse_effect_label_candidates(match.group(1))
+                if cleaned:
+                    return cleaned
         return list(DEFAULT_EFFECT_LABELS)
+
+    def _parse_effect_label_candidates(self, raw_labels: Any) -> list[str]:
+        """Parse and sanitize prompt-provided effect-label candidates."""
+
+        normalized_raw = str(raw_labels).strip().strip("[]")
+        labels = [self._normalize_label(label) for label in normalized_raw.split(",")]
+        cleaned: list[str] = []
+        for label in labels:
+            if not label:
+                continue
+            if not re.match(r"^[a-z0-9_]+$", label):
+                continue
+            cleaned.append(label)
+        return cleaned
 
     def _normalize_label(self, label: Any) -> str:
         """Normalize label text so prompt extraction stays stable."""

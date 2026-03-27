@@ -239,3 +239,35 @@ def test_gemini_client_raises_runtime_error_on_transport_failure() -> None:
 
     with pytest.raises(RuntimeError, match="Gemini request failed"):
         client.generate("Ты разметчик отзывов о пищевых добавках.\nДопустимые effect_label: energy")
+
+
+def test_gemini_client_extract_effect_labels_old_prompt_marker() -> None:
+    """The legacy prompt marker should keep extracting effect labels as before."""
+
+    client = GeminiClient(api_key="test-key", opener=lambda *_args, **_kwargs: None)
+
+    labels = client._extract_effect_labels("Допустимые effect_label: energy, side_effects, other")
+
+    assert labels == ["energy", "side_effects", "other"]
+
+
+def test_gemini_client_extract_effect_labels_with_changed_wording() -> None:
+    """Slightly changed prompt wording should still produce the effect-label vocabulary."""
+
+    client = GeminiClient(api_key="test-key", opener=lambda *_args, **_kwargs: None)
+
+    prompt = "Allowed effect_labels = energy, side effects, other"
+    labels = client._extract_effect_labels(prompt)
+
+    assert labels == ["energy", "side_effects", "other"]
+
+
+def test_gemini_client_extract_effect_labels_falls_back_safely_when_not_parseable() -> None:
+    """If labels cannot be extracted from prompt text, defaults should be used safely."""
+
+    client = GeminiClient(api_key="test-key", opener=lambda *_args, **_kwargs: None)
+
+    prompt = "effect_label: одно из значений списка ниже"
+    labels = client._extract_effect_labels(prompt)
+
+    assert labels == ["energy", "side_effects", "other"]

@@ -177,6 +177,31 @@ python run_pipeline.py --config configs/demo_minecraft.yaml
 
 ---
 
+## Запуск в VS Code
+
+В репозитории добавлены project-level настройки для локального запуска через VS Code:
+
+- `.vscode/settings.json` включает `pytest` и использует локальный интерпретатор `.venv`.
+- `.vscode/tasks.json` добавляет четыре готовые задачи:
+  - `unit tests`
+  - `integration smoke`
+  - `run demo_fitness`
+  - `run demo_minecraft`
+- `pytest.ini` направляет временные pytest-артефакты в `.pytest_tmp`, чтобы тесты запускались из рабочей директории проекта, а не зависели от системного temp-каталога.
+
+Как использовать:
+
+1. Откройте репозиторий в VS Code.
+2. Убедитесь, что выбран интерпретатор `.\.venv\Scripts\python.exe`.
+3. Для тестов откройте `Testing` и запустите discovery через `pytest`.
+4. Для ручных прогонов откройте `Terminal -> Run Task` и выберите одну из задач:
+   - `unit tests`
+   - `integration smoke`
+   - `run demo_fitness`
+   - `run demo_minecraft`
+
+---
+
 ## Hugging Face Discovery MVP
 
 Для non-demo конфигов source discovery может обращаться к публичному Hugging Face datasets search API по теме из запроса.

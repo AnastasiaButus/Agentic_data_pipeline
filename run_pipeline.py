@@ -35,6 +35,7 @@ def _print_run_summary(ctx: PipelineContext, result: dict[str, Any]) -> None:
     final_report_path = _resolve_report_path(ctx, result, "final_report")
     eda_html_path = _resolve_report_path(ctx, result, "eda_html_report")
     review_workspace_path = _resolve_report_path(ctx, result, "review_workspace")
+    source_approval_workspace_path = _resolve_report_path(ctx, result, "source_approval_workspace")
 
     print("Pipeline run completed.")
     print(f"Runtime mode: {result.get('runtime_mode', 'unknown')}")
@@ -50,6 +51,9 @@ def _print_run_summary(ctx: PipelineContext, result: dict[str, Any]) -> None:
     if review_workspace_path is not None:
         print(f"Review workspace: {review_workspace_path}")
         print(f"Review workspace URL: {review_workspace_path.as_uri()}")
+    if source_approval_workspace_path is not None:
+        print(f"Source approval workspace: {source_approval_workspace_path}")
+        print(f"Source approval workspace URL: {source_approval_workspace_path.as_uri()}")
 
     review_status = str(result.get("review_status", "") or "")
     if review_status == "skipped_missing_corrected_queue":
@@ -94,6 +98,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Open reports/review_workspace.html after a successful run",
     )
+    parser.add_argument(
+        "--open-source-approval-workspace",
+        action="store_true",
+        help="Open reports/source_approval_workspace.html after a successful run",
+    )
     args = parser.parse_args(argv)
 
     config = load_config(Path(args.config))
@@ -109,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
         _open_artifact(_resolve_report_path(ctx, result, "dashboard"))
     if args.open_review_workspace:
         _open_artifact(_resolve_report_path(ctx, result, "review_workspace"))
+    if args.open_source_approval_workspace:
+        _open_artifact(_resolve_report_path(ctx, result, "source_approval_workspace"))
 
     return 0
 

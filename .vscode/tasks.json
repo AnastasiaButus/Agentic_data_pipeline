@@ -2,6 +2,20 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "open launcher",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Start-Process .\\ui\\project_launcher.html"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "unit tests",
       "type": "shell",
       "command": ".\\.venv\\Scripts\\python.exe",
@@ -103,6 +117,20 @@
         "-NoProfile",
         "-Command",
         "Start-Process .\\reports\\run_dashboard.html"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "open source approval workspace",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Start-Process .\\reports\\source_approval_workspace.html"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

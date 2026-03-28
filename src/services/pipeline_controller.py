@@ -223,6 +223,7 @@ class PipelineController:
         dashboard_stage = "human_review" if review_required and corrected_queue is None else "completed"
         final_report_path = "final_report.md"
         review_workspace_path = "reports/review_workspace.html"
+        source_approval_workspace_path = "reports/source_approval_workspace.html"
 
         final_summary = {
             "runtime": runtime_summary,
@@ -295,8 +296,10 @@ class PipelineController:
             },
             "approval": {
                 "approved_sources_path": "data/raw/approved_sources.json",
+                "approval_candidates_path": "data/raw/approval_candidates.json",
                 "n_approved_sources": len(approved_sources),
                 "approval_status": approval_status,
+                "source_approval_workspace_path": source_approval_workspace_path,
             },
             "active_learning": {
                 "al_report_path": al_report_path,
@@ -324,6 +327,14 @@ class PipelineController:
         }
 
         final_report_path = self.reporting_service.write_final_report(final_summary)
+        source_approval_workspace_path = self.reporting_service.write_source_approval_workspace(
+            sources,
+            approved_sources_path=final_summary["approval"]["approved_sources_path"],
+            source_report_path=source_report_path,
+            online_governance_report_path=online_governance_report_path,
+            dashboard_path=dashboard_path,
+            final_report_path=final_report_path,
+        )
         review_workspace_path = self.reporting_service.write_review_workspace(
             review_queue,
             review_threshold,
@@ -379,6 +390,7 @@ class PipelineController:
                 "annotation_trace_report": annotation_trace_report_path,
                 "annotation_trace_context": annotation_trace_context_path,
                 "review_workspace": review_workspace_path,
+                "source_approval_workspace": source_approval_workspace_path,
                 "review_queue_report": review_queue_report_path,
                 "review_queue_context": review_queue_context_path,
                 "review_merge_report": review_merge_report_path,

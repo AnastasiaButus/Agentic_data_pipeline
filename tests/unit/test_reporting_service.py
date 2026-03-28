@@ -315,6 +315,41 @@ def test_source_report_and_approval_candidates_include_compliance_fields(tmp_pat
     assert "html=" not in report
 
 
+def test_source_approval_workspace_is_created_and_exports_approved_ids(tmp_path: Path) -> None:
+    """The source approval workspace should expose an interactive export path for approved source ids."""
+
+    service = ReportingService(_make_context(tmp_path))
+    source = SourceCandidate(
+        "demo_fitness_scrape",
+        "scrape",
+        "Fitness Supplements Offline Demo",
+        "demo://fitness-supplements",
+        score=1.0,
+        metadata={"html": "<html></html>", "demo_mode": True, "topic": "fitness supplements"},
+    )
+    service.registry.save_markdown("final_report.md", "# Final Report\n")
+    service.registry.save_markdown("reports/source_report.md", "# Source Report\n")
+    service.registry.save_markdown("reports/online_governance_report.md", "# Governance\n")
+
+    workspace_path = service.write_source_approval_workspace(
+        [source],
+        approved_sources_path="data/raw/approved_sources.json",
+        source_report_path="reports/source_report.md",
+        online_governance_report_path="reports/online_governance_report.md",
+        dashboard_path="reports/run_dashboard.html",
+        final_report_path="final_report.md",
+    )
+    html = (tmp_path / workspace_path).read_text(encoding="utf-8")
+
+    assert "Source Approval Workspace" in html
+    assert "Download approved_sources.json" in html
+    assert "demo_fitness_scrape" in html
+    assert "source-approval-body" in html
+    assert "approved_sources.json" in html
+    assert "copy-approved-path" in html
+    assert "downloadApprovedSources" in html
+
+
 def test_review_queue_report_and_context_make_hitl_steps_explicit(tmp_path: Path) -> None:
     """The review queue artifacts should tell the reviewer what to do next."""
 
@@ -431,6 +466,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     service = ReportingService(_make_context(tmp_path))
     service.registry.save_markdown("final_report.md", "# Final Report\n")
     service.registry.save_markdown("reports/source_report.md", "# Source Report\n")
+    service.registry.save_text("reports/source_approval_workspace.html", "<html><body>Source Approval</body></html>")
     service.registry.save_markdown("reports/online_governance_report.md", "# Online Governance\n")
     service.registry.save_markdown("reports/review_agreement_report.md", "# Agreement\n")
     service.registry.save_markdown("reports/training_comparison_report.md", "# Training Comparison\n")
@@ -562,6 +598,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
         "approval": {
             "approved_sources_path": "data/raw/approved_sources.json",
             "approval_status": "skipped_missing_file",
+            "source_approval_workspace_path": "reports/source_approval_workspace.html",
         },
         "active_learning": {
             "al_report_path": "reports/al_report.md",
@@ -587,6 +624,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     assert 'href="training_comparison_report.md"' in html
     assert 'href="al_comparison_report.md"' in html
     assert 'href="review_workspace.html"' in html
+    assert 'href="source_approval_workspace.html"' in html
     assert 'href="online_governance_report.md"' in html
     assert "../data/interim/model_artifact.pkl" in html
     assert "Cleaned word cloud" in html

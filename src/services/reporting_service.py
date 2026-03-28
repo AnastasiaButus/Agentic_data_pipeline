@@ -185,6 +185,593 @@ class ReportingService:
         self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
         return path
 
+    def write_source_approval_workspace(
+        self,
+        sources: list[Any],
+        *,
+        approved_sources_path: str,
+        source_report_path: str,
+        online_governance_report_path: str,
+        dashboard_path: str,
+        final_report_path: str,
+    ) -> str:
+        """Write an interactive HTML workspace for manual source approval."""
+
+        workspace_path = "reports/source_approval_workspace.html"
+        rows = [self._candidate_to_approval_record(candidate) for candidate in sources]
+
+        existing_approved_ids: list[str] = []
+        if self.registry.exists(approved_sources_path):
+            try:
+                payload = self.registry.load_json(approved_sources_path)
+            except Exception:
+                payload = []
+            if isinstance(payload, list):
+                existing_approved_ids = [
+                    self._normalize_text(item)
+                    for item in payload
+                    if self._normalize_text(item)
+                ]
+
+        existing_approved_set = set(existing_approved_ids)
+        editor_rows = [
+            {
+                "source_id": self._normalize_text(row.get("source_id")),
+                "source_type": self._normalize_text(row.get("source_type")),
+                "title": self._normalize_text(row.get("title")),
+                "uri": self._normalize_text(row.get("uri")),
+                "score": self._format_numeric(row.get("score")),
+                "license": self._normalize_text(row.get("license")),
+                "license_status": self._normalize_text(row.get("license_status")),
+                "robots_txt_status": self._normalize_text(row.get("robots_txt_status")),
+                "robots_txt_url": self._normalize_text(row.get("robots_txt_url")),
+                "approval_notes": self._normalize_text(row.get("approval_notes")),
+                "approved": self._normalize_text(row.get("source_id")) in existing_approved_set,
+            }
+            for row in rows
+        ]
+        editor_rows_json = json.dumps(editor_rows, ensure_ascii=False).replace("</", "<\\/")
+        approved_ids_json = json.dumps(existing_approved_ids, ensure_ascii=False).replace("</", "<\\/")
+        approved_sources_download_name = Path(approved_sources_path).name or "approved_sources.json"
+        source_type_tags = sorted(
+            {self._normalize_text(row.get("source_type")) for row in rows if self._normalize_text(row.get("source_type"))}
+        )
+
+        if not rows:
+            status_title = "No source candidates found"
+            status_body = (
+                "This run did not produce discovery candidates, so there is nothing to approve yet. "
+                "Check the config, runtime mode, and online governance notes before the next rerun."
+            )
+        elif existing_approved_ids:
+            status_title = "Approval input already exists"
+            status_body = (
+                "An existing approved_sources.json was detected. You can keep the current selection, "
+                "change it here, and download a refreshed file before the next pipeline rerun."
+            )
+        else:
+            status_title = "Approval file is missing"
+            status_body = (
+                "Select the candidates you want to allow, download approved_sources.json, place it in the expected path, "
+                "and rerun the pipeline if you want collection to be constrained to explicit source approval."
+            )
+
+        checklist_items = [
+            "Review source type, title, and URI before approving a candidate.",
+            "Check license, robots status, and approval notes for any compliance warnings.",
+            "Select only the sources you want to allow in the next rerun.",
+            "Download approved_sources.json and place it in the expected input path.",
+            "Rerun the pipeline and confirm the approved subset in the dashboard and final report.",
+        ]
+        checklist_html = "".join(f"<li>{self._escape_html(item)}</li>" for item in checklist_items)
+
+        quick_links = [
+            {
+                "label": "Open source shortlist",
+                "path": source_report_path,
+                "description": "Markdown shortlist with the same discovery candidates and compliance fields.",
+                "expected": False,
+            },
+            {
+                "label": "Open online governance report",
+                "path": online_governance_report_path,
+                "description": "Remote provider limits, auth mode, fallback notes and operator guidance.",
+                "expected": False,
+            },
+            {
+                "label": "Open operator dashboard",
+                "path": dashboard_path,
+                "description": "Return to the full run dashboard after the approval decision is made.",
+                "expected": False,
+            },
+            {
+                "label": "Open final report",
+                "path": final_report_path,
+                "description": "Inspect the compact markdown summary for this run.",
+                "expected": False,
+            },
+        ]
+        quick_links_html = "".join(
+            self._render_dashboard_link_tile(
+                workspace_path,
+                item["label"],
+                item["path"],
+                item["description"],
+                expected=bool(item["expected"]),
+            )
+            for item in quick_links
+        )
+
+        file_items = [
+            {
+                "label": "Approval candidates JSON",
+                "path": "data/raw/approval_candidates.json",
+                "note": "Machine-readable shortlist with compliance metadata for the current run.",
+            },
+            {
+                "label": "Approved sources input",
+                "path": approved_sources_path,
+                "note": "Expected reviewer output file that constrains the next rerun to approved sources.",
+                "expected": True,
+            },
+            {
+                "label": "Source shortlist markdown",
+                "path": source_report_path,
+                "note": "Human-facing shortlist summary for discovery and approval review.",
+            },
+            {
+                "label": "Online governance report",
+                "path": online_governance_report_path,
+                "note": "Operational notes about rate limits, fallback behavior, and auth mode.",
+            },
+        ]
+        file_items_html = "".join(
+            self._render_dashboard_artifact_item(workspace_path, item)
+            for item in file_items
+        )
+
+        html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Source Approval Workspace</title>
+  <style>
+    :root {{
+      --bg: #f3ede3;
+      --panel: rgba(255, 250, 243, 0.94);
+      --ink: #1f2a30;
+      --muted: #5d6a72;
+      --accent: #1f6f78;
+      --accent-soft: #cbe5df;
+      --warm: #d97706;
+      --warm-soft: #fde7c7;
+      --line: rgba(31, 42, 48, 0.12);
+      --shadow: 0 22px 48px rgba(31, 42, 48, 0.10);
+      --radius: 22px;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: "Segoe UI Variable Text", "Trebuchet MS", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(31, 111, 120, 0.16), transparent 28%),
+        radial-gradient(circle at top right, rgba(217, 119, 6, 0.18), transparent 24%),
+        linear-gradient(180deg, #f8f3eb 0%, var(--bg) 100%);
+      min-height: 100vh;
+    }}
+    .shell {{ max-width: 1240px; margin: 0 auto; padding: 32px 20px 48px; }}
+    .hero {{
+      background: linear-gradient(135deg, rgba(255, 250, 243, 0.98), rgba(244, 237, 227, 0.92));
+      border: 1px solid var(--line);
+      border-radius: calc(var(--radius) + 4px);
+      box-shadow: var(--shadow);
+      padding: 28px;
+    }}
+    .hero-grid {{ display: grid; grid-template-columns: 1.8fr 1fr; gap: 22px; align-items: start; }}
+    .eyebrow {{
+      text-transform: uppercase;
+      letter-spacing: 0.10em;
+      font-size: 12px;
+      color: var(--accent);
+      margin-bottom: 10px;
+      font-weight: 700;
+    }}
+    h1 {{ font-size: clamp(2rem, 4vw, 3.2rem); line-height: 1.03; margin: 0 0 14px; }}
+    .lede {{ max-width: 760px; line-height: 1.65; color: var(--muted); margin: 0; }}
+    .hero-meta {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }}
+    .meta-pill, .tag {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.8);
+    }}
+    .tag-wrap {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }}
+    .metrics {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-top: 24px; }}
+    .metric-card, .panel, .link-tile {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: 0 12px 28px rgba(31, 42, 48, 0.06);
+    }}
+    .metric-card {{ padding: 18px; }}
+    .metric-label {{ font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }}
+    .metric-value {{ margin-top: 10px; font-size: 1.6rem; font-weight: 700; }}
+    .status-card {{
+      padding: 18px;
+      border-radius: var(--radius);
+      background: linear-gradient(135deg, #fff7eb, #ffe7c3);
+      border: 1px solid rgba(217, 119, 6, 0.20);
+    }}
+    .status-card.ready {{
+      background: linear-gradient(135deg, #f4fffc, #ddf4ed);
+      border-color: rgba(31, 111, 120, 0.20);
+    }}
+    .status-card h2 {{ margin: 0 0 10px; font-size: 1.05rem; }}
+    .status-card p {{ margin: 0 0 10px; line-height: 1.55; }}
+    .layout {{ display: grid; grid-template-columns: 1.15fr 1fr; gap: 20px; margin-top: 22px; }}
+    .panel {{ padding: 22px; }}
+    .panel h2 {{ margin: 0 0 10px; font-size: 1.15rem; }}
+    .panel p {{ margin: 0; color: var(--muted); line-height: 1.6; }}
+    .checklist {{ margin: 0; padding-left: 18px; color: var(--muted); line-height: 1.6; }}
+    .quick-links {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 16px; }}
+    .link-tile {{
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      padding: 18px;
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }}
+    .link-tile:hover {{ transform: translateY(-2px); box-shadow: 0 18px 34px rgba(31, 42, 48, 0.10); border-color: rgba(31, 111, 120, 0.26); }}
+    .link-tile .title {{ font-size: 1rem; font-weight: 700; }}
+    .link-tile .path {{ margin-top: 8px; font-family: "Cascadia Mono", "Consolas", monospace; font-size: 0.82rem; color: var(--accent); word-break: break-all; }}
+    .link-tile .description {{ margin-top: 8px; color: var(--muted); line-height: 1.5; font-size: 0.92rem; }}
+    .artifact-list {{ display: grid; gap: 10px; margin-top: 16px; }}
+    .artifact-item {{ border-top: 1px solid var(--line); padding-top: 10px; }}
+    .artifact-item:first-child {{ border-top: none; padding-top: 0; }}
+    .artifact-item a {{ color: var(--ink); text-decoration: none; font-weight: 600; }}
+    .artifact-item a:hover {{ color: var(--accent); }}
+    .artifact-status {{
+      display: inline-flex;
+      align-items: center;
+      margin-top: 6px;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: #edf7f4;
+      color: var(--accent);
+    }}
+    .artifact-status.expected {{ background: var(--warm-soft); color: #9a5a03; }}
+    .artifact-note, .muted {{ color: var(--muted); font-size: 0.92rem; line-height: 1.5; }}
+    .artifact-path {{ margin-top: 6px; font-family: "Cascadia Mono", "Consolas", monospace; font-size: 0.8rem; color: var(--accent); word-break: break-all; }}
+    .editor-actions {{ display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }}
+    .editor-button {{
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 10px 16px;
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--ink);
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+      box-shadow: 0 10px 22px rgba(31, 42, 48, 0.05);
+    }}
+    .editor-button:hover {{ transform: translateY(-1px); border-color: rgba(31, 111, 120, 0.26); }}
+    .editor-button.primary {{
+      background: linear-gradient(135deg, #ddf4ed, #f4fffc);
+      border-color: rgba(31, 111, 120, 0.22);
+      color: var(--accent);
+    }}
+    .editor-button.warm {{
+      background: linear-gradient(135deg, #fff7eb, #ffe7c3);
+      border-color: rgba(217, 119, 6, 0.20);
+      color: #9a5a03;
+    }}
+    .editor-note {{
+      margin-top: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+      font-size: 0.92rem;
+    }}
+    .editor-status {{
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(203, 229, 223, 0.44);
+      border: 1px solid rgba(31, 111, 120, 0.12);
+      color: var(--ink);
+      line-height: 1.55;
+    }}
+    .editor-status.warning {{
+      background: rgba(253, 231, 199, 0.82);
+      border-color: rgba(217, 119, 6, 0.18);
+      color: #8c4f00;
+    }}
+    .editor-shell {{
+      margin-top: 16px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.82);
+    }}
+    .editor-table {{ width: 100%; border-collapse: collapse; min-width: 1160px; }}
+    .editor-table th, .editor-table td {{
+      padding: 12px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 0.94rem;
+    }}
+    .editor-table th {{
+      font-size: 0.78rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: rgba(31, 111, 120, 0.06);
+      position: sticky;
+      top: 0;
+    }}
+    .editor-table tr:last-child td {{ border-bottom: none; }}
+    .editor-table input[type="checkbox"] {{
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+    }}
+    .inline-path {{
+      display: block;
+      margin-top: 6px;
+      font-family: "Cascadia Mono", "Consolas", monospace;
+      font-size: 0.8rem;
+      color: var(--accent);
+      word-break: break-all;
+    }}
+    @media (max-width: 960px) {{
+      .hero-grid, .layout {{ grid-template-columns: 1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="eyebrow">Source Approval Entry Point</div>
+          <h1>Source Approval Workspace</h1>
+          <p class="lede">This page turns discovery output into one human-facing approval step: inspect candidate sources, compare license and robots signals, decide what is allowed, and export `approved_sources.json` for the next pipeline rerun.</p>
+          <div class="hero-meta">
+            <span class="meta-pill">project: {self._escape_html(getattr(self.ctx.config.project, "name", ""))}</span>
+            <span class="meta-pill">topic: {self._escape_html(getattr(self.ctx.config.request, "topic", ""))}</span>
+            <span class="meta-pill">approved file: {self._escape_html("present" if existing_approved_ids else "missing")}</span>
+          </div>
+          <div class="metrics">
+            <article class="metric-card">
+              <div class="metric-label">Candidates</div>
+              <div class="metric-value">{self._escape_html(self._format_numeric(len(rows)))}</div>
+            </article>
+            <article class="metric-card">
+              <div class="metric-label">Preapproved</div>
+              <div class="metric-value">{self._escape_html(self._format_numeric(len(existing_approved_ids)))}</div>
+            </article>
+            <article class="metric-card">
+              <div class="metric-label">Remote types</div>
+              <div class="metric-value">{self._escape_html(self._format_numeric(len(source_type_tags)))}</div>
+            </article>
+          </div>
+        </div>
+        <div class="status-card{' ready' if existing_approved_ids else ''}">
+          <h2>{self._escape_html(status_title)}</h2>
+          <p>{self._escape_html(status_body)}</p>
+          <p><strong>Primary action:</strong> download `approved_sources.json` if you want the next rerun to use only explicit source approvals.</p>
+          <p><strong>Next step:</strong> place the file in the expected path and rerun the pipeline.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <h2>Approval checklist</h2>
+        <p>Keep the approval step explicit and easy to audit. The exported file contains only approved `source_id` values, so the next rerun stays simple and reproducible.</p>
+        <div class="tag-wrap">{self._render_dashboard_tag_list(source_type_tags, empty_label="not set")}</div>
+        <ol class="checklist">{checklist_html}</ol>
+      </div>
+      <div class="panel">
+        <h2>Open first</h2>
+        <p>These links are the fastest way to compare discovery candidates, governance notes, and the current run summary.</p>
+        <div class="quick-links">{quick_links_html}</div>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <h2>Approval files and status</h2>
+        <p>The expected approval input stays visible even when it is still missing, so the operator always sees what should be created before the next rerun.</p>
+        <div class="artifact-list">{file_items_html}</div>
+      </div>
+      <div class="panel">
+        <h2>Approval semantics</h2>
+        <p>The exported file is a plain JSON list of approved `source_id` values. Keep it intentionally small and explicit: approve the sources you want, leave the rest out, and rerun.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Interactive source approval editor</h2>
+      <p>Toggle the candidates you want to allow, then export `approved_sources.json` for the next pipeline rerun.</p>
+      <div class="editor-actions">
+        <button class="editor-button primary" type="button" id="download-approved-sources">Download approved_sources.json</button>
+        <button class="editor-button" type="button" id="select-all-sources">Select all</button>
+        <button class="editor-button" type="button" id="clear-approved-sources">Clear selection</button>
+        <button class="editor-button warm" type="button" id="copy-approved-path">Copy expected path</button>
+      </div>
+      <div class="editor-note">
+        Expected input path on rerun: <strong>{self._escape_html(approved_sources_path)}</strong>.
+        The downloaded file uses the exact filename <strong>{self._escape_html(approved_sources_download_name)}</strong>.
+      </div>
+      <div class="editor-status" id="source-approval-status">Select the sources you want to allow, then download approved_sources.json for the next rerun.</div>
+      <div class="editor-shell">
+        <table class="editor-table">
+          <thead>
+            <tr>
+              <th>approve</th>
+              <th>source_id</th>
+              <th>type</th>
+              <th>title</th>
+              <th>score</th>
+              <th>license</th>
+              <th>license_status</th>
+              <th>robots_txt_status</th>
+              <th>approval_notes</th>
+              <th>uri</th>
+            </tr>
+          </thead>
+          <tbody id="source-approval-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script>
+    const sourceApprovalRows = {editor_rows_json};
+    const initiallyApprovedSourceIds = {approved_ids_json};
+    const approvedSourcesPath = {json.dumps(approved_sources_path, ensure_ascii=False)};
+    const approvedSourcesFilename = {json.dumps(approved_sources_download_name, ensure_ascii=False)};
+    const sourceApprovalBody = document.getElementById("source-approval-body");
+    const sourceApprovalStatus = document.getElementById("source-approval-status");
+
+    function escapeHtml(value) {{
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }}
+
+    function setApprovalStatus(message, tone = "info") {{
+      sourceApprovalStatus.textContent = message;
+      sourceApprovalStatus.className = tone === "warning" ? "editor-status warning" : "editor-status";
+    }}
+
+    function renderSourceApprovalEditor() {{
+      if (!sourceApprovalRows.length) {{
+        sourceApprovalBody.innerHTML = '<tr><td colspan="10">No discovery candidates are available for approval in this run.</td></tr>';
+        setApprovalStatus("This run did not produce discovery candidates, so there is nothing to export yet.", "warning");
+        return;
+      }}
+
+      sourceApprovalBody.innerHTML = sourceApprovalRows.map((row, index) => {{
+        return `
+          <tr>
+            <td><input type="checkbox" data-index="${{index}}" data-field="approved"${{row.approved ? " checked" : ""}} /></td>
+            <td>${{escapeHtml(row.source_id)}}</td>
+            <td>${{escapeHtml(row.source_type)}}</td>
+            <td>${{escapeHtml(row.title)}}</td>
+            <td>${{escapeHtml(row.score)}}</td>
+            <td>${{escapeHtml(row.license)}}</td>
+            <td>${{escapeHtml(row.license_status)}}</td>
+            <td>${{escapeHtml(row.robots_txt_status)}}</td>
+            <td>${{escapeHtml(row.approval_notes || "none")}}</td>
+            <td><span class="inline-path">${{escapeHtml(row.uri)}}</span></td>
+          </tr>
+        `;
+      }}).join("");
+    }}
+
+    function collectApprovedIds() {{
+      return sourceApprovalRows
+        .filter((row) => row.approved && String(row.source_id || "").trim())
+        .map((row) => String(row.source_id).trim());
+    }}
+
+    function downloadApprovedSources() {{
+      if (!sourceApprovalRows.length) {{
+        setApprovalStatus("There are no discovery candidates to export in this run.", "warning");
+        return;
+      }}
+
+      const approvedIds = collectApprovedIds();
+      const payload = JSON.stringify(approvedIds, null, 2);
+      const blob = new Blob([payload], {{ type: "application/json;charset=utf-8;" }});
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = approvedSourcesFilename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      if (approvedIds.length) {{
+        setApprovalStatus(`Downloaded ${{approvedSourcesFilename}} with ${{approvedIds.length}} approved source_id values. Place it at ${{approvedSourcesPath}} before the next rerun.`);
+      }} else {{
+        setApprovalStatus(`Downloaded an empty ${{approvedSourcesFilename}}. This will force an explicit empty approved subset on the next rerun.`, "warning");
+      }}
+    }}
+
+    function selectAllSources() {{
+      sourceApprovalRows.forEach((row) => {{
+        row.approved = true;
+      }});
+      renderSourceApprovalEditor();
+      setApprovalStatus("All discovery candidates are currently selected for approval.");
+    }}
+
+    function clearApprovedSources() {{
+      sourceApprovalRows.forEach((row) => {{
+        row.approved = false;
+      }});
+      renderSourceApprovalEditor();
+      setApprovalStatus("All discovery candidates were deselected. Downloading now would create an explicit empty subset.", "warning");
+    }}
+
+    async function copyApprovedPath() {{
+      try {{
+        if (navigator.clipboard && navigator.clipboard.writeText) {{
+          await navigator.clipboard.writeText(approvedSourcesPath);
+          setApprovalStatus(`Copied expected approved sources path: ${{approvedSourcesPath}}`);
+          return;
+        }}
+      }} catch (error) {{
+      }}
+      setApprovalStatus(`Clipboard access is unavailable here. Expected path: ${{approvedSourcesPath}}`, "warning");
+    }}
+
+    sourceApprovalBody.addEventListener("change", (event) => {{
+      const target = event.target;
+      const index = Number(target?.dataset?.index);
+      const field = target?.dataset?.field;
+      if (!Number.isInteger(index) || field !== "approved" || !sourceApprovalRows[index]) {{
+        return;
+      }}
+      sourceApprovalRows[index].approved = Boolean(target.checked);
+      const approvedIds = collectApprovedIds();
+      setApprovalStatus(`Current approval selection contains ${{approvedIds.length}} source_id value(s). Download approved_sources.json when you are ready.`);
+    }});
+
+    document.getElementById("download-approved-sources")?.addEventListener("click", downloadApprovedSources);
+    document.getElementById("select-all-sources")?.addEventListener("click", selectAllSources);
+    document.getElementById("clear-approved-sources")?.addEventListener("click", clearApprovedSources);
+    document.getElementById("copy-approved-path")?.addEventListener("click", copyApprovedPath);
+
+    if (initiallyApprovedSourceIds.length) {{
+      setApprovalStatus(`Existing approved_sources.json was detected with ${{initiallyApprovedSourceIds.length}} source_id value(s). Update the selection if needed, then download a refreshed file.`);
+    }}
+    renderSourceApprovalEditor();
+  </script>
+</body>
+</html>"""
+
+        path = Path(workspace_path)
+        self.registry.save_text(path, html)
+        return str(path)
+
     def write_quality_report(self, quality_report: Any) -> str:
         """Write a quality summary that is easy to drop into README-style docs."""
 
@@ -1871,6 +2458,11 @@ class ReportingService:
                 "description": "Shortlist найденных источников и approval guidance.",
             },
             {
+                "label": "Open source approval workspace",
+                "path": approval.get("source_approval_workspace_path"),
+                "description": "Interactive source approval page that exports approved_sources.json for the next rerun.",
+            },
+            {
                 "label": "Open online governance",
                 "path": online_governance.get("governance_report_path"),
                 "description": "Rate limits, auth mode, provider status and fallback behavior for remote discovery.",
@@ -2725,6 +3317,7 @@ class ReportingService:
                 "items": [
                     {"label": "Final report", "path": dashboard.get("final_report_path"), "note": "Главный markdown summary по текущему запуску."},
                     {"label": "Source shortlist", "path": sources.get("source_report_path"), "note": "Shortlist источников и approval guidance."},
+                    {"label": "Source approval workspace", "path": approval.get("source_approval_workspace_path"), "note": "Interactive approval page for selecting allowed sources and exporting approved_sources.json."},
                     {"label": "Online governance report", "path": online_governance.get("governance_report_path"), "note": "Remote provider limits, auth mode, fallback behavior and operator guidance."},
                     {"label": "EDA markdown", "path": eda.get("eda_report_path"), "note": "Подробный EDA для README/demo narrative."},
                     {"label": "EDA HTML", "path": eda.get("eda_html_report_path"), "note": "Наглядный HTML-отчёт для показа преподавателю."},
@@ -2753,6 +3346,7 @@ class ReportingService:
                 "items": [
                     {"label": "Discovered sources", "path": "data/raw/discovered_sources.json", "note": "Полный сериализованный shortlist discovery stage."},
                     {"label": "Approval candidates", "path": "data/raw/approval_candidates.json", "note": "Упрощённый helper JSON для approval flow."},
+                    {"label": "Source approval workspace", "path": approval.get("source_approval_workspace_path"), "note": "HTML approval entry point for choosing allowed sources before the next rerun."},
                     {"label": "Online governance context", "path": online_governance.get("governance_context_path"), "note": "Machine-readable remote-provider status, auth mode and fallback summary."},
                     {"label": "Approved sources input", "path": approval.get("approved_sources_path"), "note": "Опциональный input-файл для ручного approval.", "expected": True},
                 ],

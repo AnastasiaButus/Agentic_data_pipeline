@@ -63,6 +63,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "annotation_trace_report_path" in final_report
     assert "annotation_trace_context_path" in final_report
     assert "approval_status: skipped_missing_file" in final_report
+    assert "source_approval_workspace_path: reports/source_approval_workspace.html" in final_report
     assert "governance_report_path: reports/online_governance_report.md" in final_report
     assert "github_auth_mode: not_used" in final_report
     assert "review_workspace_path: reports/review_workspace.html" in final_report
@@ -147,12 +148,16 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "missing_values_summary" in eda_context
     assert "quality_warnings" in eda_context
     source_report = (tmp_path / "reports" / "source_report.md").read_text(encoding="utf-8")
+    source_approval_workspace = (tmp_path / "reports" / "source_approval_workspace.html").read_text(encoding="utf-8")
     assert "Короткий shortlist источников" in source_report
     assert "ручного просмотра и одобрения" in source_report
     assert "Fitness Supplements Offline Demo" in source_report
     assert "score:" in source_report
     assert "license: offline_demo_fixture" in source_report
     assert "robots_txt_status: not_applicable_local_demo" in source_report
+    assert "Source Approval Workspace" in source_approval_workspace
+    assert "Download approved_sources.json" in source_approval_workspace
+    assert "demo_fitness_scrape" in source_approval_workspace
     governance_report = (tmp_path / "reports" / "online_governance_report.md").read_text(encoding="utf-8")
     governance_context = json.loads((tmp_path / "data" / "raw" / "online_governance_summary.json").read_text(encoding="utf-8"))
     assert "Online governance and fallback" in governance_report
@@ -167,6 +172,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "training_comparison_report.md" in dashboard_html
     assert "al_comparison_report.md" in dashboard_html
     assert "review_workspace.html" in dashboard_html
+    assert "source_approval_workspace.html" in dashboard_html
     assert "online_governance_report.md" in dashboard_html
     assert "Cleaned word cloud" in dashboard_html
     assert "HITL control center" in dashboard_html

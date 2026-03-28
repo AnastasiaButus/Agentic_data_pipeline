@@ -88,6 +88,9 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "HITL Review Workspace" in review_workspace
     assert "review_queue_corrected.csv" in review_workspace
     assert "reviewed_effect_label" in review_workspace
+    assert "Interactive review editor" in review_workspace
+    assert "Download corrected queue CSV" in review_workspace
+    assert "copy-corrected-path" in review_workspace
     agreement_report = (tmp_path / "reports" / "review_agreement_report.md").read_text(encoding="utf-8")
     agreement_context = json.loads((tmp_path / "data" / "interim" / "review_agreement_context.json").read_text(encoding="utf-8"))
     training_comparison_report = (tmp_path / "reports" / "training_comparison_report.md").read_text(encoding="utf-8")

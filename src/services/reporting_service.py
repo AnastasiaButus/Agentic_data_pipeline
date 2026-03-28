@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import json
 import posixpath
 import re
 from pathlib import Path
@@ -916,6 +917,28 @@ class ReportingService:
                 "</div>"
             )
 
+        def _review_bool(value: Any) -> bool:
+            normalized = self._normalize_text(value).lower()
+            return normalized in {"true", "1", "yes", "y"} if normalized else bool(value is True)
+
+        editor_rows = [
+            {
+                "id": self._normalize_text(row.get("id")),
+                "source": self._normalize_text(row.get("source")),
+                "text": self._normalize_text(row.get("text")),
+                "label": self._normalize_text(row.get("label")),
+                "effect_label": self._normalize_text(row.get("effect_label")),
+                "confidence": self._format_numeric(row.get("confidence")),
+                "reviewed_effect_label": self._normalize_text(row.get("reviewed_effect_label")) or self._normalize_text(row.get("effect_label")),
+                "review_comment": self._normalize_text(row.get("review_comment")),
+                "human_verified": _review_bool(row.get("human_verified")),
+            }
+            for row in rows
+        ]
+        editor_rows_json = json.dumps(editor_rows, ensure_ascii=False).replace("</", "<\\/")
+        label_options_json = json.dumps([self._normalize_text(label) for label in label_options], ensure_ascii=False).replace("</", "<\\/")
+        corrected_queue_download_name = Path(corrected_queue_path).name or "review_queue_corrected.csv"
+
         html = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -1073,6 +1096,93 @@ class ReportingService:
       background: rgba(244, 255, 252, 0.92);
       border: 1px solid rgba(31, 111, 120, 0.16);
     }}
+    .editor-actions {{ display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }}
+    .editor-button {{
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 10px 16px;
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--ink);
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+      box-shadow: 0 10px 22px rgba(31, 42, 48, 0.05);
+    }}
+    .editor-button:hover {{ transform: translateY(-1px); border-color: rgba(31, 111, 120, 0.26); }}
+    .editor-button.primary {{
+      background: linear-gradient(135deg, #ddf4ed, #f4fffc);
+      border-color: rgba(31, 111, 120, 0.22);
+      color: var(--accent);
+    }}
+    .editor-button.warm {{
+      background: linear-gradient(135deg, #fff7eb, #ffe7c3);
+      border-color: rgba(217, 119, 6, 0.20);
+      color: #9a5a03;
+    }}
+    .editor-note {{
+      margin-top: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+      font-size: 0.92rem;
+    }}
+    .editor-shell {{
+      margin-top: 16px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.82);
+    }}
+    .editor-table {{ width: 100%; border-collapse: collapse; min-width: 1100px; }}
+    .editor-table th, .editor-table td {{
+      padding: 12px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 0.94rem;
+    }}
+    .editor-table th {{
+      font-size: 0.78rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: rgba(31, 111, 120, 0.06);
+      position: sticky;
+      top: 0;
+    }}
+    .editor-table tr:last-child td {{ border-bottom: none; }}
+    .editor-table select,
+    .editor-table textarea {{
+      width: 100%;
+      border: 1px solid rgba(31, 42, 48, 0.16);
+      border-radius: 12px;
+      padding: 8px 10px;
+      font: inherit;
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.96);
+    }}
+    .editor-table textarea {{
+      min-height: 72px;
+      resize: vertical;
+    }}
+    .editor-table input[type="checkbox"] {{
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+    }}
+    .editor-status {{
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(203, 229, 223, 0.44);
+      border: 1px solid rgba(31, 111, 120, 0.12);
+      color: var(--ink);
+      line-height: 1.55;
+    }}
+    .editor-status.warning {{
+      background: rgba(253, 231, 199, 0.82);
+      border-color: rgba(217, 119, 6, 0.18);
+      color: #8c4f00;
+    }}
     @media (max-width: 960px) {{
       .hero-grid, .layout {{ grid-template-columns: 1fr; }}
     }}
@@ -1155,7 +1265,205 @@ class ReportingService:
       <p>This preview mirrors the current low-confidence queue so the reviewer can orient quickly before opening the CSV.</p>
       {queue_preview_html}
     </section>
+
+    <section class="panel queue-panel">
+      <h2>Interactive review editor</h2>
+      <p>Use this editor to set `reviewed_effect_label`, add optional comments, and export a ready-to-merge `review_queue_corrected.csv` without editing the raw queue by hand.</p>
+      <div class="editor-actions">
+        <button class="editor-button primary" type="button" id="download-corrected-queue">Download corrected queue CSV</button>
+        <button class="editor-button" type="button" id="reset-review-editor">Reset editor</button>
+        <button class="editor-button warm" type="button" id="copy-corrected-path">Copy expected path</button>
+      </div>
+      <div class="editor-note">
+        Expected corrected queue path on rerun: <strong>{self._escape_html(corrected_queue_path)}</strong>.
+        The downloaded file uses the exact filename <strong>{self._escape_html(corrected_queue_download_name)}</strong>.
+      </div>
+      <div class="editor-status" id="review-editor-status">Editor is ready. Update the table below, then download the corrected queue CSV for the next pipeline run.</div>
+      <div class="editor-shell">
+        <table class="editor-table">
+          <thead>
+            <tr>
+              <th>id</th>
+              <th>source</th>
+              <th>current effect</th>
+              <th>confidence</th>
+              <th>reviewed_effect_label</th>
+              <th>review_comment</th>
+              <th>human_verified</th>
+              <th>text</th>
+            </tr>
+          </thead>
+          <tbody id="review-editor-body"></tbody>
+        </table>
+      </div>
+    </section>
   </div>
+  <script>
+    const reviewEditorRows = {editor_rows_json};
+    const reviewLabelOptions = {label_options_json};
+    const correctedQueuePath = {json.dumps(corrected_queue_path, ensure_ascii=False)};
+    const correctedQueueFilename = {json.dumps(corrected_queue_download_name, ensure_ascii=False)};
+    const reviewEditorBody = document.getElementById("review-editor-body");
+    const reviewEditorStatus = document.getElementById("review-editor-status");
+    const initialReviewEditorRows = reviewEditorRows.map((row) => ({{ ...row }}));
+
+    function escapeHtml(value) {{
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }}
+
+    function toCsvValue(value) {{
+      const normalized = String(value ?? "");
+      return `"${{normalized.replace(/"/g, '""')}}"`;
+    }}
+
+    function setEditorStatus(message, tone = "info") {{
+      reviewEditorStatus.textContent = message;
+      reviewEditorStatus.className = tone === "warning" ? "editor-status warning" : "editor-status";
+    }}
+
+    function renderReviewEditor() {{
+      if (!reviewEditorRows.length) {{
+        reviewEditorBody.innerHTML = '<tr><td colspan="8">No review rows are available for interactive editing in this run.</td></tr>';
+        setEditorStatus("The low-confidence review queue is empty, so the interactive editor is currently in read-only idle mode.");
+        return;
+      }}
+
+      reviewEditorBody.innerHTML = reviewEditorRows.map((row, index) => {{
+        const optionHtml = reviewLabelOptions.map((label) => {{
+          const selected = label === row.reviewed_effect_label ? " selected" : "";
+          return `<option value="${{escapeHtml(label)}}"${{selected}}>${{escapeHtml(label)}}</option>`;
+        }}).join("");
+        const truncatedText = escapeHtml(row.text.length > 220 ? `${{row.text.slice(0, 217)}}...` : row.text);
+        return `
+          <tr>
+            <td>${{escapeHtml(row.id)}}</td>
+            <td>${{escapeHtml(row.source)}}</td>
+            <td>${{escapeHtml(row.effect_label)}}</td>
+            <td>${{escapeHtml(row.confidence)}}</td>
+            <td>
+              <select data-index="${{index}}" data-field="reviewed_effect_label">
+                ${{optionHtml}}
+              </select>
+            </td>
+            <td>
+              <textarea data-index="${{index}}" data-field="review_comment" placeholder="Optional reviewer note">${{escapeHtml(row.review_comment)}}</textarea>
+            </td>
+            <td>
+              <input type="checkbox" data-index="${{index}}" data-field="human_verified"${{row.human_verified ? " checked" : ""}} />
+            </td>
+            <td>${{truncatedText}}</td>
+          </tr>
+        `;
+      }}).join("");
+    }}
+
+    function buildCorrectedQueueCsv() {{
+      const headers = [
+        "id",
+        "source",
+        "text",
+        "label",
+        "effect_label",
+        "confidence",
+        "reviewed_effect_label",
+        "review_comment",
+        "human_verified"
+      ];
+      const rows = reviewEditorRows.map((row) => [
+        row.id,
+        row.source,
+        row.text,
+        row.label,
+        row.effect_label,
+        row.confidence,
+        row.reviewed_effect_label,
+        row.review_comment,
+        row.human_verified ? "true" : "false"
+      ]);
+      return [
+        headers.join(","),
+        ...rows.map((row) => row.map(toCsvValue).join(","))
+      ].join("\\r\\n");
+    }}
+
+    function downloadCorrectedQueue() {{
+      if (!reviewEditorRows.length) {{
+        setEditorStatus("There are no review rows to export in this run.", "warning");
+        return;
+      }}
+
+      const csvText = buildCorrectedQueueCsv();
+      const blob = new Blob([csvText], {{ type: "text/csv;charset=utf-8;" }});
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = correctedQueueFilename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setEditorStatus(`Downloaded ${{correctedQueueFilename}}. The next pipeline run expects it at ${{correctedQueuePath}}.`);
+    }}
+
+    function resetReviewEditor() {{
+      reviewEditorRows.splice(0, reviewEditorRows.length, ...initialReviewEditorRows.map((row) => ({{ ...row }})));
+      renderReviewEditor();
+      setEditorStatus("The interactive review editor has been reset to the current queue snapshot.");
+    }}
+
+    async function copyCorrectedPath() {{
+      try {{
+        if (navigator.clipboard && navigator.clipboard.writeText) {{
+          await navigator.clipboard.writeText(correctedQueuePath);
+          setEditorStatus(`Copied expected corrected queue path: ${{correctedQueuePath}}`);
+          return;
+        }}
+      }} catch (error) {{
+      }}
+      setEditorStatus(`Clipboard access is unavailable here. Expected path: ${{correctedQueuePath}}`, "warning");
+    }}
+
+    reviewEditorBody.addEventListener("input", (event) => {{
+      const target = event.target;
+      const index = Number(target?.dataset?.index);
+      const field = target?.dataset?.field;
+      if (!Number.isInteger(index) || !field || !reviewEditorRows[index]) {{
+        return;
+      }}
+      if (field === "human_verified") {{
+        reviewEditorRows[index][field] = Boolean(target.checked);
+      }} else {{
+        reviewEditorRows[index][field] = target.value;
+      }}
+      setEditorStatus("Editor changes are ready. Download the corrected queue CSV when you finish the review.");
+    }});
+
+    reviewEditorBody.addEventListener("change", (event) => {{
+      const target = event.target;
+      const index = Number(target?.dataset?.index);
+      const field = target?.dataset?.field;
+      if (!Number.isInteger(index) || !field || !reviewEditorRows[index]) {{
+        return;
+      }}
+      if (field === "human_verified") {{
+        reviewEditorRows[index][field] = Boolean(target.checked);
+      }} else {{
+        reviewEditorRows[index][field] = target.value;
+      }}
+      setEditorStatus("Editor changes are ready. Download the corrected queue CSV when you finish the review.");
+    }});
+
+    document.getElementById("download-corrected-queue")?.addEventListener("click", downloadCorrectedQueue);
+    document.getElementById("reset-review-editor")?.addEventListener("click", resetReviewEditor);
+    document.getElementById("copy-corrected-path")?.addEventListener("click", copyCorrectedPath);
+
+    renderReviewEditor();
+  </script>
 </body>
 </html>"""
 

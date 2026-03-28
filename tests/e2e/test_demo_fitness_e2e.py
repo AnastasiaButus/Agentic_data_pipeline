@@ -84,6 +84,9 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     review_workspace = (tmp_path / "reports" / "review_workspace.html").read_text(encoding="utf-8")
     assert "HITL Review Workspace" in review_workspace
     assert "review_queue_corrected.csv" in review_workspace
+    assert "Interactive review editor" in review_workspace
+    assert "Download corrected queue CSV" in review_workspace
+    assert "copy-corrected-path" in review_workspace
     agreement_report = (tmp_path / "reports" / "review_agreement_report.md").read_text(encoding="utf-8")
     assert "Review agreement report" in agreement_report
     assert "compared_rows: 0" in agreement_report

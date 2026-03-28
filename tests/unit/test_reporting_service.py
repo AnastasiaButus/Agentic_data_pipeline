@@ -397,6 +397,10 @@ def test_review_workspace_is_created_and_surfaces_hitl_inputs(tmp_path: Path) ->
     assert "review_queue_corrected.csv" in html
     assert "reviewed_effect_label" in html
     assert "energy boost after morning use" in html
+    assert "Interactive review editor" in html
+    assert "Download corrected queue CSV" in html
+    assert "copy-corrected-path" in html
+    assert "renderReviewEditor" in html
     assert 'href="../final_report.md"' in html
     assert 'href="review_queue_report.md"' in html
 

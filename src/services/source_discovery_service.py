@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-from urllib.parse import quote_plus
-from urllib.request import Request, urlopen
+import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
+from urllib.request import Request, urlopen
 
 from src.core.context import PipelineContext
 from src.core.runtime import (
@@ -21,6 +22,7 @@ from src.services.source_compliance import (
     extract_github_license,
     extract_huggingface_license,
 )
+from src.services.source_governance import build_online_governance_summary
 
 
 class SourceDiscoveryService:
@@ -32,6 +34,7 @@ class SourceDiscoveryService:
         self.ctx = ctx
         self.github_client = github_client
         self.registry = registry if registry is not None else ArtifactRegistry(ctx)
+        self._last_online_governance_summary: dict[str, Any] = build_online_governance_summary(ctx.config, [])
 
     def search_huggingface(self) -> list[SourceCandidate]:
         """Return Hugging Face dataset candidates, preferring the real search path when possible."""
@@ -283,8 +286,17 @@ class SourceDiscoveryService:
 
         ranked = self.rank_candidates(candidates)
         ranked = self._limit_candidates(ranked)
+        self._last_online_governance_summary = build_online_governance_summary(self.ctx.config, ranked)
         self.registry.save_json("data/raw/discovered_sources.json", [candidate.as_dict() for candidate in ranked])
         return ranked
+
+    def get_online_governance_summary(self, candidates: list[SourceCandidate] | None = None) -> dict[str, Any]:
+        """Return the last computed online governance summary or rebuild it from candidates."""
+
+        if candidates is None:
+            return dict(self._last_online_governance_summary)
+        self._last_online_governance_summary = build_online_governance_summary(self.ctx.config, candidates)
+        return dict(self._last_online_governance_summary)
 
     def load_approved_source_ids(self, path: str | Path = "data/raw/approved_sources.json") -> list[str] | None:
         """Load approved source ids from a simple JSON list.
@@ -418,13 +430,17 @@ class SourceDiscoveryService:
         """
 
         url = f"https://api.github.com/search/repositories?q={quote_plus(topic)}&sort=stars&order=desc&per_page=10"
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "universal-agentic-data-pipeline",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        github_token = os.getenv("GITHUB_TOKEN", "").strip()
+        if github_token:
+            headers["Authorization"] = f"Bearer {github_token}"
         request = Request(
             url,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "User-Agent": "universal-agentic-data-pipeline",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
+            headers=headers,
         )
         with urlopen(request, timeout=5) as response:
             raw = response.read().decode("utf-8")

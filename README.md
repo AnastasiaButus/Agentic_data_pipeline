@@ -178,6 +178,13 @@ flowchart LR
 
 Если online lookup не удался, пайплайн должен безопасно вернуться к стабильному пути и не ломать baseline.
 
+Operational notes для online-path:
+
+- GitHub discovery может работать в `unauthenticated` режиме, но он заметно чувствительнее к rate limits;
+- при наличии `GITHUB_TOKEN` GitHub Search path становится стабильнее;
+- итог запуска теперь фиксируется в `reports/online_governance_report.md` и `data/raw/online_governance_summary.json`;
+- fallback-стратегия остаётся offline-first: пустой remote shortlist не должен ломать весь run.
+
 ### Явный runtime.mode
 
 Теперь режим можно фиксировать прямо в конфиге через секцию:
@@ -262,8 +269,10 @@ LLM используется только там, где он действите
 - `final_report.md`
 - `data/raw/discovered_sources.json`
 - `data/raw/approval_candidates.json`
+- `data/raw/online_governance_summary.json`
 - `data/raw/merged_raw.parquet`
 - `reports/source_report.md`
+- `reports/online_governance_report.md`
 - `reports/quality_report.md`
 - `reports/eda_report.md`
 - `reports/eda_report.html`
@@ -415,6 +424,7 @@ python run_pipeline.py --config configs/your_gemini_config.yaml
 - text-first фокус;
 - online ingestion слой пока MVP;
 - governance/compliance уже покрывает базовые `license` и `robots.txt` сигналы в approval artifacts, но ещё не является полным policy engine;
+- rate-limit awareness и fallback reporting уже вынесены в отдельный online governance layer, но это ещё не полный observability/monitoring stack;
 - scraping не является production-ready браузерным пайплайном;
 - мультимодальность пока не главный трек.
 

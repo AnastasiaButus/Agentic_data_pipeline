@@ -160,6 +160,42 @@ def test_search_github_repos_uses_topic_from_request_config(monkeypatch, tmp_pat
     assert captured["query"] == "fitness supplements reviews"
 
 
+def test_fetch_github_repositories_uses_github_token_when_available(monkeypatch, tmp_path: Path) -> None:
+    """The low-level GitHub fetch helper should include Authorization when GITHUB_TOKEN is set."""
+
+    context = _make_context(tmp_path)
+    context.config.project.name = "non-demo"
+    service = SourceDiscoveryService(context)
+
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return b'{"items": []}'
+
+    def fake_urlopen(request, timeout=5):
+        captured["authorization"] = request.get_header("Authorization")
+        captured["user_agent"] = request.get_header("User-agent")
+        captured["timeout"] = timeout
+        return _FakeResponse()
+
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
+    monkeypatch.setattr("src.services.source_discovery_service.urlopen", fake_urlopen)
+
+    payload = service._fetch_github_repositories("fitness supplements")
+
+    assert payload == {"items": []}
+    assert captured["authorization"] == "Bearer secret-token"
+    assert captured["user_agent"] == "universal-agentic-data-pipeline"
+    assert captured["timeout"] == 5
+
+
 def test_non_demo_shortlist_omits_fake_stub_candidates(monkeypatch, tmp_path: Path) -> None:
     """Non-demo discovery should not auto-add fake API, GitHub, or scrape stubs."""
 

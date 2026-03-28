@@ -8,8 +8,10 @@ from pathlib import Path
 from src.core.config import load_config
 
 
-def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> None:
+def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_path: Path) -> None:
     """The full demo pipeline should run locally on the persistent fitness config without monkeypatch."""
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
 
     repo_root = Path(__file__).resolve().parents[2]
     template_path = repo_root / "configs" / "demo_fitness.yaml"
@@ -60,6 +62,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert "annotation_trace_report_path" in final_report
     assert "annotation_trace_context_path" in final_report
     assert "approval_status: skipped_missing_file" in final_report
+    assert "governance_report_path: reports/online_governance_report.md" in final_report
     assert "review_merge_report_path" in final_report
     approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
     assert isinstance(approval_candidates, list)
@@ -104,9 +107,13 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(tmp_path: Path) -> 
     assert "Fitness Supplements Offline Demo" in source_report
     assert "license: offline_demo_fixture" in source_report
     assert "robots_txt_status: not_applicable_local_demo" in source_report
+    governance_report = (tmp_path / "reports" / "online_governance_report.md").read_text(encoding="utf-8")
+    assert "Online governance and fallback" in governance_report
+    assert "configured_but_inactive_for_runtime" in governance_report
     dashboard_html = (tmp_path / "reports" / "run_dashboard.html").read_text(encoding="utf-8")
     assert "Pipeline Operator Dashboard" in dashboard_html
     assert "../final_report.md" in dashboard_html
+    assert "online_governance_report.md" in dashboard_html
     assert "review_queue_corrected.csv" in dashboard_html
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert (tmp_path / "data" / "interim" / "model_metrics.json").exists()

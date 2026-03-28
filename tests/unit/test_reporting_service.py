@@ -100,6 +100,46 @@ def test_eda_html_report_is_created(tmp_path: Path) -> None:
     assert "Charts" in html
 
 
+def test_online_governance_report_and_context_are_created(tmp_path: Path) -> None:
+    """The governance layer should produce both human-facing and machine-readable artifacts."""
+
+    service = ReportingService(_make_context(tmp_path))
+    summary = {
+        "remote_sources_enabled": True,
+        "active_provider_count": 1,
+        "github_auth_mode": "unauthenticated",
+        "fallback_strategy": "empty remote shortlist keeps the run stable",
+        "notes": ["Configure GITHUB_TOKEN to reduce GitHub Search API rate-limit risk."],
+        "providers": [
+            {
+                "provider_id": "github_repository_search",
+                "label": "GitHub repository search API",
+                "enabled_in_config": True,
+                "active_in_runtime": True,
+                "observed_status": "active_no_candidates",
+                "discovered_candidates": 0,
+                "auth_mode": "unauthenticated",
+                "implementation_status": "real_lookup_mvp",
+                "rate_limit_guidance": "GitHub Search API is more fragile without GITHUB_TOKEN.",
+                "fallback_behavior": "Pipeline continues without remote candidates.",
+                "operator_action": "Set GITHUB_TOKEN to reduce GitHub Search API rate-limit risk.",
+            }
+        ],
+    }
+
+    report_path = service.write_online_governance_report(summary)
+    context_path = service.write_online_governance_context(summary)
+
+    report = (tmp_path / report_path).read_text(encoding="utf-8")
+    context = json.loads((tmp_path / context_path).read_text(encoding="utf-8"))
+
+    assert "Online governance and fallback" in report
+    assert "github_auth_mode: unauthenticated" in report
+    assert "provider_id: github_repository_search" in report
+    assert "operator_action: Set GITHUB_TOKEN" in report
+    assert context["github_auth_mode"] == "unauthenticated"
+
+
 def test_source_report_and_approval_candidates_include_compliance_fields(tmp_path: Path) -> None:
     """Approval-facing source artifacts should surface license and robots metadata explicitly."""
 
@@ -197,6 +237,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     service = ReportingService(_make_context(tmp_path))
     service.registry.save_markdown("final_report.md", "# Final Report\n")
     service.registry.save_markdown("reports/source_report.md", "# Source Report\n")
+    service.registry.save_markdown("reports/online_governance_report.md", "# Online Governance\n")
     service.registry.save_text("reports/eda_report.html", "<html><body>EDA</body></html>")
     service.registry.save_markdown("reports/review_queue_report.md", "# Review Queue\n")
     service.registry.save_markdown("reports/review_merge_report.md", "# Review Merge\n")
@@ -204,6 +245,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     service.registry.save_json("data/interim/review_merge_context.json", {"review_status": "skipped_missing_corrected_queue"})
     service.registry.save_json("data/raw/approval_candidates.json", [{"source_id": "demo"}])
     service.registry.save_json("data/raw/discovered_sources.json", [{"source_id": "demo"}])
+    service.registry.save_json("data/raw/online_governance_summary.json", {"github_auth_mode": "unauthenticated"})
     service.registry.save_json("data/interim/eda_context.json", {"n_rows": 2})
     service.registry.save_json("data/interim/annotation_trace.json", {"llm_mode": "classify_effect"})
     service.registry.save_json("data/interim/model_metrics.json", {"accuracy": 1.0, "f1": 1.0})
@@ -232,6 +274,14 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
             "next_step": "human review rerun recommended before final retrain",
         },
         "sources": {"n_candidates": 1, "source_report_path": "reports/source_report.md"},
+        "online_governance": {
+            "governance_report_path": "reports/online_governance_report.md",
+            "governance_context_path": "data/raw/online_governance_summary.json",
+            "active_provider_count": 0,
+            "providers_requiring_attention": ["github_repository_search"],
+            "github_auth_mode": "unauthenticated",
+            "fallback_strategy": "empty remote shortlist keeps the run stable",
+        },
         "quality": {"warnings": ["duplicates removed"]},
         "eda": {
             "eda_report_path": "reports/eda_report.md",
@@ -275,7 +325,9 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     assert "effective_mode: offline_demo" in html
     assert 'href="../final_report.md"' in html
     assert 'href="eda_report.html"' in html
+    assert 'href="online_governance_report.md"' in html
     assert "../data/interim/model_artifact.pkl" in html
     assert "Corrected queue CSV" in html
     assert "expected input" in html
     assert "needs action" in html
+    assert "GitHub auth mode" in html

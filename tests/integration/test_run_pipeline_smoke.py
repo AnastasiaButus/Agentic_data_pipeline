@@ -17,8 +17,10 @@ def _runtime_config_text(template_text: str, tmp_path: Path, provider: str) -> s
     )
 
 
-def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> None:
+def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_path: Path) -> None:
     """The CLI should run end-to-end on the persistent fitness demo config without monkeypatch."""
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
 
     repo_root = Path(__file__).resolve().parents[2]
     template_path = repo_root / "configs" / "demo_fitness.yaml"
@@ -49,6 +51,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert "## Dashboard" in final_report
     assert "effective_mode: offline_demo" in final_report
     assert "dashboard_path: reports/run_dashboard.html" in final_report
+    assert "## Online Governance" in final_report
     assert "## Approval" in final_report
     assert "## EDA" in final_report
     assert "## Annotation" in final_report
@@ -58,6 +61,8 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert "annotation_trace_report_path" in final_report
     assert "annotation_trace_context_path" in final_report
     assert "approval_status: skipped_missing_file" in final_report
+    assert "governance_report_path: reports/online_governance_report.md" in final_report
+    assert "github_auth_mode: not_used" in final_report
     assert "review_required:" in final_report
     assert "next_step:" in final_report
     approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
@@ -118,10 +123,17 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(tmp_path: Path) -> 
     assert "score:" in source_report
     assert "license: offline_demo_fixture" in source_report
     assert "robots_txt_status: not_applicable_local_demo" in source_report
+    governance_report = (tmp_path / "reports" / "online_governance_report.md").read_text(encoding="utf-8")
+    governance_context = json.loads((tmp_path / "data" / "raw" / "online_governance_summary.json").read_text(encoding="utf-8"))
+    assert "Online governance and fallback" in governance_report
+    assert "provider_id: huggingface_datasets" in governance_report
+    assert "configured_but_inactive_for_runtime" in governance_report
+    assert governance_context["github_auth_mode"] == "not_used"
     dashboard_html = (tmp_path / "reports" / "run_dashboard.html").read_text(encoding="utf-8")
     assert "Pipeline Operator Dashboard" in dashboard_html
     assert "effective_mode: offline_demo" in dashboard_html
     assert "../final_report.md" in dashboard_html
+    assert "online_governance_report.md" in dashboard_html
     assert "review_queue_report.md" in dashboard_html
     assert "review_queue_corrected.csv" in dashboard_html
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()

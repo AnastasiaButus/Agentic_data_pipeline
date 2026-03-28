@@ -682,6 +682,7 @@ class ReportingService:
             "runtime": "Runtime",
             "dashboard": "Dashboard",
             "sources": "Sources",
+            "online_governance": "Online Governance",
             "quality": "Quality",
             "eda": "EDA",
             "annotation": "Annotation",
@@ -691,7 +692,7 @@ class ReportingService:
             "training": "Training",
             "artifacts": "Artifacts",
         }
-        for section_name in ["runtime", "dashboard", "sources", "quality", "eda", "annotation", "review", "approval", "active_learning", "training", "artifacts"]:
+        for section_name in ["runtime", "dashboard", "sources", "online_governance", "quality", "eda", "annotation", "review", "approval", "active_learning", "training", "artifacts"]:
             section = summary.get(section_name)
             lines.append(f"## {section_titles[section_name]}")
             lines.append("")
@@ -709,12 +710,71 @@ class ReportingService:
         self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
         return path
 
+    def write_online_governance_report(self, summary: dict[str, Any]) -> str:
+        """Write a human-facing report about remote-provider limits and fallback behavior."""
+
+        lines = [
+            "# Online governance and fallback",
+            "",
+            "Этот отчёт показывает, какие remote providers были активны, где есть риск лимитов и как pipeline ведёт себя, если online lookup ничего не вернул.",
+            "",
+            f"- remote_sources_enabled: {summary.get('remote_sources_enabled')}",
+            f"- active_provider_count: {summary.get('active_provider_count')}",
+            f"- github_auth_mode: {self._normalize_text(summary.get('github_auth_mode')) or 'not_used'}",
+            f"- fallback_strategy: {self._normalize_text(summary.get('fallback_strategy'))}",
+        ]
+
+        notes = summary.get("notes", []) if isinstance(summary.get("notes"), list) else []
+        if notes:
+            lines.extend(["", "## Operator notes"])
+            for note in notes:
+                lines.append(f"- {self._normalize_text(note)}")
+
+        providers = summary.get("providers", []) if isinstance(summary.get("providers"), list) else []
+        if providers:
+            for index, provider in enumerate(providers, start=1):
+                if not isinstance(provider, dict):
+                    continue
+                lines.extend(
+                    [
+                        "",
+                        f"## Provider {index}",
+                        f"- provider_id: {self._normalize_text(provider.get('provider_id'))}",
+                        f"- label: {self._normalize_text(provider.get('label'))}",
+                        f"- enabled_in_config: {provider.get('enabled_in_config')}",
+                        f"- active_in_runtime: {provider.get('active_in_runtime')}",
+                        f"- observed_status: {self._normalize_text(provider.get('observed_status'))}",
+                        f"- discovered_candidates: {provider.get('discovered_candidates')}",
+                        f"- auth_mode: {self._normalize_text(provider.get('auth_mode'))}",
+                        f"- implementation_status: {self._normalize_text(provider.get('implementation_status'))}",
+                        f"- rate_limit_guidance: {self._normalize_text(provider.get('rate_limit_guidance'))}",
+                        f"- fallback_behavior: {self._normalize_text(provider.get('fallback_behavior'))}",
+                    ]
+                )
+                operator_action = self._normalize_text(provider.get("operator_action"))
+                if operator_action:
+                    lines.append(f"- operator_action: {operator_action}")
+        else:
+            lines.extend(["", "## Provider summary", "- Remote providers are not configured for this run."])
+
+        path = "reports/online_governance_report.md"
+        self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
+        return path
+
+    def write_online_governance_context(self, summary: dict[str, Any]) -> str:
+        """Write the machine-readable online governance summary."""
+
+        path = Path("data/raw/online_governance_summary.json")
+        self.registry.save_json(path, summary)
+        return str(path)
+
     def write_run_dashboard(self, summary: dict[str, Any]) -> str:
         """Write a single-page operator dashboard that links the user to the main artifacts."""
 
         runtime = summary.get("runtime", {}) if isinstance(summary.get("runtime"), dict) else {}
         dashboard = summary.get("dashboard", {}) if isinstance(summary.get("dashboard"), dict) else {}
         sources = summary.get("sources", {}) if isinstance(summary.get("sources"), dict) else {}
+        online_governance = summary.get("online_governance", {}) if isinstance(summary.get("online_governance"), dict) else {}
         quality = summary.get("quality", {}) if isinstance(summary.get("quality"), dict) else {}
         eda = summary.get("eda", {}) if isinstance(summary.get("eda"), dict) else {}
         annotation = summary.get("annotation", {}) if isinstance(summary.get("annotation"), dict) else {}
@@ -729,12 +789,16 @@ class ReportingService:
         review_required = bool(review.get("review_required", False))
         configured_remote = runtime.get("configured_remote_source_types", []) if isinstance(runtime.get("configured_remote_source_types"), list) else []
         active_remote = runtime.get("active_remote_source_types", []) if isinstance(runtime.get("active_remote_source_types"), list) else []
+        governance_attention = online_governance.get("providers_requiring_attention", []) if isinstance(online_governance.get("providers_requiring_attention"), list) else []
+        governance_fallback = self._normalize_text(online_governance.get("fallback_strategy")) or "empty remote shortlist keeps the run stable"
+        github_auth_mode = self._normalize_text(online_governance.get("github_auth_mode")) or "not_used"
 
         status_cards = [
             ("Runtime mode", self._normalize_text(runtime.get("effective_mode")) or "unknown"),
             ("Source candidates", self._format_numeric(sources.get("n_candidates", 0))),
             ("Review queue", self._format_numeric(review.get("review_queue_rows", 0))),
             ("Approval", self._normalize_text(approval.get("approval_status")) or "unknown"),
+            ("Remote ops", self._format_numeric(online_governance.get("active_provider_count", 0))),
             ("Accuracy", self._format_numeric(training.get("accuracy", "n/a"))),
             ("F1", self._format_numeric(training.get("f1", "n/a"))),
         ]
@@ -773,6 +837,11 @@ class ReportingService:
                 "label": "Open source shortlist",
                 "path": sources.get("source_report_path"),
                 "description": "Shortlist найденных источников и approval guidance.",
+            },
+            {
+                "label": "Open online governance",
+                "path": online_governance.get("governance_report_path"),
+                "description": "Rate limits, auth mode, provider status and fallback behavior for remote discovery.",
             },
         ]
         primary_links_html = "".join(
@@ -995,6 +1064,10 @@ class ReportingService:
             <div class="tag-wrap">{self._render_dashboard_tag_list(active_remote, empty_label="нет")}</div>
             <p style="margin-top: 16px;">Demo sources enabled: <strong>{self._escape_html("yes" if runtime.get("demo_sources_enabled") else "no")}</strong></p>
             <p>Human review required: <strong>{self._escape_html("yes" if review_required else "no")}</strong></p>
+            <p>GitHub auth mode: <strong>{self._escape_html(github_auth_mode)}</strong></p>
+            <p>Fallback strategy: <strong>{self._escape_html(governance_fallback)}</strong></p>
+            <p style="margin-top: 16px;">Providers requiring attention</p>
+            <div class="tag-wrap">{self._render_dashboard_tag_list(governance_attention, empty_label="none")}</div>
           </div>
         </div>
       </div>
@@ -1217,6 +1290,7 @@ class ReportingService:
 
         dashboard = summary.get("dashboard", {}) if isinstance(summary.get("dashboard"), dict) else {}
         sources = summary.get("sources", {}) if isinstance(summary.get("sources"), dict) else {}
+        online_governance = summary.get("online_governance", {}) if isinstance(summary.get("online_governance"), dict) else {}
         eda = summary.get("eda", {}) if isinstance(summary.get("eda"), dict) else {}
         annotation = summary.get("annotation", {}) if isinstance(summary.get("annotation"), dict) else {}
         review = summary.get("review", {}) if isinstance(summary.get("review"), dict) else {}
@@ -1230,6 +1304,7 @@ class ReportingService:
                 "items": [
                     {"label": "Final report", "path": dashboard.get("final_report_path"), "note": "Главный markdown summary по текущему запуску."},
                     {"label": "Source shortlist", "path": sources.get("source_report_path"), "note": "Shortlist источников и approval guidance."},
+                    {"label": "Online governance report", "path": online_governance.get("governance_report_path"), "note": "Remote provider limits, auth mode, fallback behavior and operator guidance."},
                     {"label": "EDA markdown", "path": eda.get("eda_report_path"), "note": "Подробный EDA для README/demo narrative."},
                     {"label": "EDA HTML", "path": eda.get("eda_html_report_path"), "note": "Наглядный HTML-отчёт для показа преподавателю."},
                     {"label": "Annotation report", "path": annotation.get("annotation_report_path"), "note": "Сводка по effect labels и confidence."},
@@ -1253,6 +1328,7 @@ class ReportingService:
                 "items": [
                     {"label": "Discovered sources", "path": "data/raw/discovered_sources.json", "note": "Полный сериализованный shortlist discovery stage."},
                     {"label": "Approval candidates", "path": "data/raw/approval_candidates.json", "note": "Упрощённый helper JSON для approval flow."},
+                    {"label": "Online governance context", "path": online_governance.get("governance_context_path"), "note": "Machine-readable remote-provider status, auth mode and fallback summary."},
                     {"label": "Approved sources input", "path": approval.get("approved_sources_path"), "note": "Опциональный input-файл для ручного approval.", "expected": True},
                 ],
             },

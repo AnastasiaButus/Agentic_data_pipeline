@@ -15,6 +15,7 @@ from src.providers.llm.gemini_client import GeminiClient
 from src.providers.llm.mock_llm import MockLLM
 from src.services.review_queue_service import CORRECTED_QUEUE_PATH, ReviewQueueService
 from src.services.reporting_service import ReportingService
+from src.services.source_governance import build_online_governance_summary
 from src.services.source_discovery_service import SourceDiscoveryService
 from src.services.training_service import TrainingService
 
@@ -76,6 +77,13 @@ class PipelineController:
         runtime_summary = build_runtime_summary(self.ctx.config)
         sources = self.discovery_service.run()
         source_report_path = self.reporting_service.write_source_report(sources)
+        online_governance_getter = getattr(self.discovery_service, "get_online_governance_summary", None)
+        if callable(online_governance_getter):
+            online_governance_detail = online_governance_getter(sources)
+        else:
+            online_governance_detail = build_online_governance_summary(self.ctx.config, sources)
+        online_governance_report_path = self.reporting_service.write_online_governance_report(online_governance_detail)
+        online_governance_context_path = self.reporting_service.write_online_governance_context(online_governance_detail)
 
         approval_file_exists = self.discovery_service.registry.exists("data/raw/approved_sources.json")
         approved_sources = self.discovery_service.load_approved_candidates(sources)
@@ -205,6 +213,15 @@ class PipelineController:
                 "n_candidates": len(sources),
                 "source_report_path": source_report_path,
             },
+            "online_governance": {
+                "governance_report_path": online_governance_report_path,
+                "governance_context_path": online_governance_context_path,
+                "remote_sources_enabled": online_governance_detail.get("remote_sources_enabled"),
+                "active_provider_count": online_governance_detail.get("active_provider_count"),
+                "providers_requiring_attention": online_governance_detail.get("providers_requiring_attention"),
+                "github_auth_mode": online_governance_detail.get("github_auth_mode"),
+                "fallback_strategy": online_governance_detail.get("fallback_strategy"),
+            },
             "quality": {
                 "quality_report_path": quality_report_path,
                 "warnings": getattr(quality_report, "warnings", []),
@@ -260,6 +277,8 @@ class PipelineController:
             "training_metrics": training_metrics,
             "reports": {
                 "source_report": source_report_path,
+                "online_governance_report": online_governance_report_path,
+                "online_governance_context": online_governance_context_path,
                 "quality_report": quality_report_path,
                 "eda_report": eda_report_path,
                 "eda_html_report": eda_html_report_path,

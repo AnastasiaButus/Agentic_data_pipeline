@@ -347,7 +347,11 @@ def test_source_approval_workspace_is_created_and_exports_approved_ids(tmp_path:
     assert "source-approval-body" in html
     assert "approved_sources.json" in html
     assert "copy-approved-path" in html
+    assert "copy-rerun-command" in html
     assert "downloadApprovedSources" in html
+    assert "What changes on rerun" in html
+    assert "same-config-you-just-used" in html
+    assert "runtime_settings.html" in html
 
 
 def test_runtime_settings_workspace_surfaces_key_status_and_gate_semantics(tmp_path: Path) -> None:
@@ -414,6 +418,8 @@ def test_runtime_settings_workspace_surfaces_key_status_and_gate_semantics(tmp_p
     assert "open_without_gate" in html
     assert "all_discovered_sources" in html
     assert "runtime_settings.html" in html
+    assert "Before the next rerun" in html
+    assert "same-config-you-just-used" in html
 
 
 def test_review_queue_report_and_context_make_hitl_steps_explicit(tmp_path: Path) -> None:
@@ -732,3 +738,5 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     assert "expected input" in html
     assert "needs action" in html
     assert "GitHub auth mode" in html
+    assert "Approval next step" in html
+    assert "Next rerun effect" in html

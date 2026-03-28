@@ -542,6 +542,14 @@ CLI в этом блоке не меняется: пайплайн по-преж
 
 Для первого знакомства с проектом удобно начинать с `open launcher`: это статическая стартовая страница `ui/project_launcher.html`, где собраны demo-конфиги, команды первого запуска, ссылки на dashboard, `runtime_settings.html`, source approval workspace, review workspace и напоминания про `GEMINI_API_KEY` / `GITHUB_TOKEN`.
 
+После запуска approval flow теперь лучше проходить в таком порядке:
+
+1. открыть `reports/runtime_settings.html` и проверить ключи / семантику gate;
+2. открыть `reports/source_approval_workspace.html` и выбрать разрешённые `source_id`;
+3. скачать `approved_sources.json` и положить его в `data/raw/approved_sources.json`;
+4. перезапустить **тот же config**, который уже использовался;
+5. открыть `reports/run_dashboard.html` и проверить `effective_collection_scope`.
+
 Что делать:
 
 1. Откройте репозиторий в VS Code.
@@ -597,7 +605,9 @@ python run_pipeline.py --config configs/your_gemini_config.yaml
 Для ручного approval теперь дополнительно используются:
 
 - `data/raw/approval_candidates.json` — shortlist в JSON с `license`, `license_status`, `robots_txt_status`, `robots_txt_url`, `approval_notes`;
-- `reports/source_report.md` — человекочитаемый markdown shortlist с теми же governance-полями для просмотра перед approve.
+- `reports/source_report.md` — человекочитаемый markdown shortlist с теми же governance-полями для просмотра перед approve;
+- `reports/source_approval_workspace.html` — интерактивный approval workspace с экспортом `approved_sources.json`, пояснением “что изменится на rerun” и шаблоном команды для повторного запуска;
+- `reports/runtime_settings.html` — run-specific страница со статусом `GEMINI_API_KEY`, `GITHUB_TOKEN`, текущей семантикой approval gate и подсказками перед следующим rerun.
 
 Это позволяет не смешивать discovery с автоматическим "юридическим движком", но делает license/robots проверку видимой частью HITL approval flow.
 

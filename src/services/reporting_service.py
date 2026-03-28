@@ -185,6 +185,74 @@ class ReportingService:
         self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
         return path
 
+    def _build_approval_gate_guidance(
+        self,
+        *,
+        has_candidates: bool,
+        approval_gate_status: str,
+        approval_status: str,
+        existing_approved_count: int,
+    ) -> dict[str, str]:
+        """Describe the operator-facing approval flow and what the next rerun will do."""
+
+        rerun_command = '.\\.venv\\Scripts\\python.exe run_pipeline.py --config <same-config-you-just-used>.yaml'
+        normalized_gate_status = self._normalize_text(approval_gate_status)
+        normalized_approval_status = self._normalize_text(approval_status)
+
+        if not has_candidates:
+            return {
+                "journey_title": "Discovery did not produce candidates yet",
+                "primary_action": "Inspect runtime settings and discovery/governance notes before trying to constrain sources.",
+                "next_step": "Adjust the config or runtime mode, rerun discovery, and return to source approval only after candidates appear.",
+                "rerun_effect": "Until discovery yields candidates, source approval cannot change the collection inputs.",
+                "risk_note": "This is safe but non-productive: exporting an approval file now will not create new candidates on the next rerun.",
+                "after_rerun_check": "After rerun, open run_dashboard.html and confirm that the source shortlist is no longer empty.",
+                "rerun_command": rerun_command,
+            }
+
+        if normalized_gate_status == "restricted_empty_subset" or normalized_approval_status == "applied_empty_subset":
+            return {
+                "journey_title": "Approval gate is active but currently blocks collection",
+                "primary_action": "Select at least one valid discovered source_id before the next rerun.",
+                "next_step": "Re-export approved_sources.json with a non-empty set of valid source_id values, then rerun the same config.",
+                "rerun_effect": "If the file stays empty or mismatched, the next rerun will keep collection empty.",
+                "risk_note": "An empty approved_sources.json is explicit and reproducible, but it intentionally prevents collection from receiving sources.",
+                "after_rerun_check": "After rerun, open run_dashboard.html and verify that effective_collection_scope is no longer no_sources_selected.",
+                "rerun_command": rerun_command,
+            }
+
+        if normalized_gate_status == "restricted_to_approved_subset" or normalized_approval_status == "applied":
+            return {
+                "journey_title": "Approval gate is already constraining collection",
+                "primary_action": "Keep the current approved subset if it is correct, or refresh it only when you intentionally want to widen or narrow collection.",
+                "next_step": "Leave approved_sources.json in place or replace it with a refreshed export, then rerun the same config.",
+                "rerun_effect": "As long as approved_sources.json remains present and matches discovered source_id values, the next rerun will use only that approved subset.",
+                "risk_note": "Deleting the file reopens collection to the full discovered shortlist; replacing it with an empty or mismatched file makes collection empty.",
+                "after_rerun_check": "After rerun, confirm effective_collection_scope and effective_source_count in run_dashboard.html or runtime_settings.html.",
+                "rerun_command": rerun_command,
+            }
+
+        if existing_approved_count:
+            return {
+                "journey_title": "An approval file exists and can be refreshed",
+                "primary_action": "Review whether the existing approved subset still matches the sources you want to keep.",
+                "next_step": "Update the selection if needed, download a refreshed approved_sources.json, and rerun the same config.",
+                "rerun_effect": "Once the refreshed file is placed in data/raw/approved_sources.json, the next rerun will switch to the exported approved subset.",
+                "risk_note": "Leaving an outdated approval file in place can unintentionally keep or exclude sources on the next rerun.",
+                "after_rerun_check": "After rerun, inspect run_dashboard.html and final_report.md to confirm that the approved subset was applied as expected.",
+                "rerun_command": rerun_command,
+            }
+
+        return {
+            "journey_title": "Source approval is currently optional",
+            "primary_action": "Use source approval only if you want the next rerun to collect from an explicit approved subset instead of the full shortlist.",
+            "next_step": "Select the allowed source_id values, download approved_sources.json, place it in data/raw/approved_sources.json, and rerun the same config.",
+            "rerun_effect": "Without approved_sources.json, the next rerun stays open and uses the full discovered shortlist. With a non-empty file, the next rerun uses only the approved subset.",
+            "risk_note": "If you export an empty file, the next rerun will create an explicit empty approved subset and collection will receive zero sources.",
+            "after_rerun_check": "After rerun, open run_dashboard.html and confirm whether effective_collection_scope changed from all_discovered_sources to approved_subset_only.",
+            "rerun_command": rerun_command,
+        }
+
     def write_source_approval_workspace(
         self,
         sources: list[Any],
@@ -245,6 +313,13 @@ class ReportingService:
         current_gate_status = self._normalize_text(approval_gate_status)
         current_scope = self._normalize_text(effective_collection_scope)
         current_effective_source_count = self._format_numeric(effective_source_count if effective_source_count is not None else len(rows))
+        approval_guidance = self._build_approval_gate_guidance(
+            has_candidates=bool(rows),
+            approval_gate_status=current_gate_status,
+            approval_status=current_status,
+            existing_approved_count=len(existing_approved_ids),
+        )
+        rerun_command_template = approval_guidance["rerun_command"]
 
         if not rows:
             status_title = "No source candidates found"
@@ -297,6 +372,12 @@ class ReportingService:
                 "label": "Open online governance report",
                 "path": online_governance_report_path,
                 "description": "Remote provider limits, auth mode, fallback notes and operator guidance.",
+                "expected": False,
+            },
+            {
+                "label": "Open runtime settings",
+                "path": "reports/runtime_settings.html",
+                "description": "Check key status, approval semantics, and next-run guidance before changing the gate.",
                 "expected": False,
             },
             {
@@ -474,6 +555,32 @@ class ReportingService:
     .artifact-status.expected {{ background: var(--warm-soft); color: #9a5a03; }}
     .artifact-note, .muted {{ color: var(--muted); font-size: 0.92rem; line-height: 1.5; }}
     .artifact-path {{ margin-top: 6px; font-family: "Cascadia Mono", "Consolas", monospace; font-size: 0.8rem; color: var(--accent); word-break: break-all; }}
+    .callout {{
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(203, 229, 223, 0.44);
+      border: 1px solid rgba(31, 111, 120, 0.12);
+      color: var(--ink);
+      line-height: 1.6;
+    }}
+    .callout.warning {{
+      background: rgba(253, 231, 199, 0.82);
+      border-color: rgba(217, 119, 6, 0.18);
+      color: #8c4f00;
+    }}
+    .command-snippet {{
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.9);
+      font-family: "Cascadia Mono", "Consolas", monospace;
+      font-size: 0.86rem;
+      color: var(--accent);
+      word-break: break-all;
+      white-space: pre-wrap;
+    }}
     .editor-actions {{ display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }}
     .editor-button {{
       border: 1px solid var(--line);
@@ -598,8 +705,9 @@ class ReportingService:
           <p><strong>Current approval status:</strong> {self._escape_html(current_status or "unknown")}</p>
           <p><strong>Gate status:</strong> {self._escape_html(current_gate_status or "unknown")}</p>
           <p><strong>Effective collection scope:</strong> {self._escape_html(current_scope or "unknown")}</p>
-          <p><strong>Primary action:</strong> download `approved_sources.json` if you want the next rerun to use only explicit source approvals.</p>
-          <p><strong>Next step:</strong> place the file in the expected path and rerun the pipeline.</p>
+          <p><strong>Primary action:</strong> {self._escape_html(approval_guidance["primary_action"])}</p>
+          <p><strong>Next step:</strong> {self._escape_html(approval_guidance["next_step"])}</p>
+          <p><strong>After rerun:</strong> {self._escape_html(approval_guidance["after_rerun_check"])}</p>
         </div>
       </div>
     </section>
@@ -627,6 +735,25 @@ class ReportingService:
       <div class="panel">
         <h2>Approval semantics</h2>
         <p>The exported file is a plain JSON list of approved `source_id` values. Keep it intentionally small and explicit: approve the sources you want, leave the rest out, and rerun.</p>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <h2>What changes on rerun</h2>
+        <p>{self._escape_html(approval_guidance["rerun_effect"])}</p>
+        <div class="callout{' warning' if current_gate_status == 'restricted_empty_subset' else ''}">{self._escape_html(approval_guidance["risk_note"])}</div>
+        <p class="editor-note"><strong>After rerun:</strong> {self._escape_html(approval_guidance["after_rerun_check"])}</p>
+      </div>
+      <div class="panel">
+        <h2>Rerun the same config</h2>
+        <p><strong>Approval journey:</strong> {self._escape_html(approval_guidance["journey_title"])}</p>
+        <p class="editor-note"><strong>Primary action:</strong> {self._escape_html(approval_guidance["primary_action"])}</p>
+        <p class="editor-note"><strong>Next step:</strong> {self._escape_html(approval_guidance["next_step"])}</p>
+        <div class="command-snippet" id="approval-rerun-command">{self._escape_html(rerun_command_template)}</div>
+        <div class="editor-actions">
+          <button class="editor-button warm" type="button" id="copy-rerun-command">Copy rerun command template</button>
+        </div>
       </div>
     </section>
 
@@ -670,6 +797,7 @@ class ReportingService:
     const initiallyApprovedSourceIds = {approved_ids_json};
     const approvedSourcesPath = {json.dumps(approved_sources_path, ensure_ascii=False)};
     const approvedSourcesFilename = {json.dumps(approved_sources_download_name, ensure_ascii=False)};
+    const rerunCommandTemplate = {json.dumps(rerun_command_template, ensure_ascii=False)};
     const sourceApprovalBody = document.getElementById("source-approval-body");
     const sourceApprovalStatus = document.getElementById("source-approval-status");
 
@@ -748,7 +876,7 @@ class ReportingService:
         row.approved = true;
       }});
       renderSourceApprovalEditor();
-      setApprovalStatus("All discovery candidates are currently selected for approval.");
+      setApprovalStatus("All discovery candidates are currently selected. If you download now, the next rerun will use only this approved subset.");
     }}
 
     function clearApprovedSources() {{
@@ -771,6 +899,18 @@ class ReportingService:
       setApprovalStatus(`Clipboard access is unavailable here. Expected path: ${{approvedSourcesPath}}`, "warning");
     }}
 
+    async function copyRerunCommand() {{
+      try {{
+        if (navigator.clipboard && navigator.clipboard.writeText) {{
+          await navigator.clipboard.writeText(rerunCommandTemplate);
+          setApprovalStatus("Copied the rerun command template. Replace <same-config-you-just-used>.yaml with the config you just ran.");
+          return;
+        }}
+      }} catch (error) {{
+      }}
+      setApprovalStatus("Clipboard access is unavailable here. Copy the rerun command template manually from the panel above.", "warning");
+    }}
+
     sourceApprovalBody.addEventListener("change", (event) => {{
       const target = event.target;
       const index = Number(target?.dataset?.index);
@@ -780,16 +920,23 @@ class ReportingService:
       }}
       sourceApprovalRows[index].approved = Boolean(target.checked);
       const approvedIds = collectApprovedIds();
-      setApprovalStatus(`Current approval selection contains ${{approvedIds.length}} source_id value(s). Download approved_sources.json when you are ready.`);
+      if (approvedIds.length) {{
+        setApprovalStatus(`Current approval selection contains ${{approvedIds.length}} source_id value(s). If you download now, the next rerun will use only this approved subset.`);
+      }} else {{
+        setApprovalStatus("Current approval selection is empty. Downloading now would create an explicit empty subset on the next rerun.", "warning");
+      }}
     }});
 
     document.getElementById("download-approved-sources")?.addEventListener("click", downloadApprovedSources);
     document.getElementById("select-all-sources")?.addEventListener("click", selectAllSources);
     document.getElementById("clear-approved-sources")?.addEventListener("click", clearApprovedSources);
     document.getElementById("copy-approved-path")?.addEventListener("click", copyApprovedPath);
+    document.getElementById("copy-rerun-command")?.addEventListener("click", copyRerunCommand);
 
     if (initiallyApprovedSourceIds.length) {{
       setApprovalStatus(`Existing approved_sources.json was detected with ${{initiallyApprovedSourceIds.length}} source_id value(s). Update the selection if needed, then download a refreshed file.`);
+    }} else if (sourceApprovalRows.length) {{
+      setApprovalStatus("No approved_sources.json was detected for this run. Download a non-empty file only if you want the next rerun constrained to explicit source approval.");
     }}
     renderSourceApprovalEditor();
   </script>
@@ -809,6 +956,7 @@ class ReportingService:
         approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
         annotation = summary.get("annotation", {}) if isinstance(summary.get("annotation"), dict) else {}
         runtime = summary.get("runtime", {}) if isinstance(summary.get("runtime"), dict) else {}
+        sources = summary.get("sources", {}) if isinstance(summary.get("sources"), dict) else {}
         workspace_path = self._normalize_text(settings.get("settings_workspace_path")) or "reports/runtime_settings.html"
 
         dashboard_path = self._normalize_artifact_reference(settings.get("dashboard_path") or dashboard.get("dashboard_path") or "reports/run_dashboard.html")
@@ -867,6 +1015,15 @@ class ReportingService:
         effective_source_count = self._format_numeric(settings.get("effective_source_count") if settings.get("effective_source_count") is not None else approval.get("effective_source_count", 0))
         gate_note = self._normalize_text(settings.get("gate_note") or approval.get("gate_note"))
         approval_status = self._normalize_text(approval.get("approval_status")) or "unknown"
+        has_candidates_value = sources.get("n_candidates")
+        if has_candidates_value is None:
+            has_candidates_value = approval.get("effective_source_count", 0)
+        approval_guidance = self._build_approval_gate_guidance(
+            has_candidates=bool(has_candidates_value),
+            approval_gate_status=approval_gate_status,
+            approval_status=approval_status,
+            existing_approved_count=int(approval.get("n_approved_sources", 0) or 0),
+        )
 
         command_blocks = [
             (
@@ -880,6 +1037,10 @@ class ReportingService:
             (
                 "Run the stable offline demo",
                 '.\\.venv\\Scripts\\python.exe run_pipeline.py --config configs\\demo_fitness.yaml',
+            ),
+            (
+                "Rerun the same config after approval",
+                approval_guidance["rerun_command"],
             ),
             (
                 "Open source approval workspace",
@@ -1097,8 +1258,15 @@ class ReportingService:
       </div>
 
       <div class="panel">
-        <h2>Open next</h2>
-        <p>These links connect the static launcher and the run-generated interfaces so the operator can move from setup to approval, review, and reporting without hunting for files.</p>
+        <h2>Before the next rerun</h2>
+        <p>{self._escape_html(approval_guidance["primary_action"])}</p>
+        <div class="stack">
+          <p><strong>Next step:</strong> {self._escape_html(approval_guidance["next_step"])}</p>
+          <p><strong>What the rerun changes:</strong> {self._escape_html(approval_guidance["rerun_effect"])}</p>
+          <p><strong>After rerun:</strong> {self._escape_html(approval_guidance["after_rerun_check"])}</p>
+        </div>
+        <div class="callout{' warning' if approval_gate_status == 'restricted_empty_subset' else ''}">{self._escape_html(approval_guidance["risk_note"])}</div>
+        <p style="margin-top: 16px;">These links connect the static launcher and the run-generated interfaces so the operator can move from setup to approval, review, and reporting without hunting for files.</p>
         <div class="quick-links">{quick_links_html}</div>
       </div>
     </section>
@@ -3714,6 +3882,12 @@ class ReportingService:
             else approval.get("effective_source_count", 0)
         )
         gate_note = self._normalize_text(settings.get("gate_note") or approval.get("gate_note"))
+        approval_guidance = self._build_approval_gate_guidance(
+            has_candidates=True,
+            approval_gate_status=approval_gate_status,
+            approval_status=self._normalize_text(approval.get("approval_status")),
+            existing_approved_count=int(approval.get("n_approved_sources", 0) or 0),
+        )
 
         if "missing" in gemini_status or "missing" in github_status or approval_gate_status == "restricted_empty_subset":
             callout_class = "callout warning"
@@ -3750,6 +3924,8 @@ class ReportingService:
             f'<p><strong>GitHub auth mode:</strong> {self._escape_html(github_auth_mode)}</p>'
             f'<p><strong>Effective collection scope:</strong> {self._escape_html(effective_scope)}</p>'
             f'<p><strong>Effective source count:</strong> {self._escape_html(effective_source_count)}</p>'
+            f'<p><strong>Approval next step:</strong> {self._escape_html(approval_guidance["next_step"])}</p>'
+            f'<p><strong>Next rerun effect:</strong> {self._escape_html(approval_guidance["rerun_effect"])}</p>'
             "</div>"
             f'<div class="quick-links">{quick_links_html}</div>'
         )

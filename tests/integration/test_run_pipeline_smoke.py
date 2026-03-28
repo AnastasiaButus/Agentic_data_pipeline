@@ -162,9 +162,12 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "Source Approval Workspace" in source_approval_workspace
     assert "Download approved_sources.json" in source_approval_workspace
     assert "demo_fitness_scrape" in source_approval_workspace
+    assert "What changes on rerun" in source_approval_workspace
+    assert "same-config-you-just-used" in source_approval_workspace
     assert "Runtime Settings Workspace" in runtime_settings_workspace
     assert "GEMINI_API_KEY" in runtime_settings_workspace
     assert "open_without_gate" in runtime_settings_workspace
+    assert "Before the next rerun" in runtime_settings_workspace
     governance_report = (tmp_path / "reports" / "online_governance_report.md").read_text(encoding="utf-8")
     governance_context = json.loads((tmp_path / "data" / "raw" / "online_governance_summary.json").read_text(encoding="utf-8"))
     assert "Online governance and fallback" in governance_report
@@ -188,6 +191,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "Settings and gate status" in dashboard_html
     assert "offline_mock_llm_active" in dashboard_html
     assert "review_queue_report.md" in dashboard_html
+    assert "Approval next step" in dashboard_html
     assert "review_queue_corrected.csv" in dashboard_html
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert (tmp_path / "data" / "interim" / "model_metrics.json").exists()

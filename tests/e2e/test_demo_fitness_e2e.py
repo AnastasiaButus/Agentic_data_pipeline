@@ -68,6 +68,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert "review_workspace_path: reports/review_workspace.html" in final_report
     assert "agreement_report_path: reports/review_agreement_report.md" in final_report
     assert "comparison_report_path: reports/training_comparison_report.md" in final_report
+    assert "al_comparison_report_path: reports/al_comparison_report.md" in final_report
     assert "review_merge_report_path" in final_report
     approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
     assert isinstance(approval_candidates, list)
@@ -89,6 +90,8 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     training_comparison_context = json.loads((tmp_path / "data" / "interim" / "training_comparison.json").read_text(encoding="utf-8"))
     assert training_comparison_context["comparison_scope"] == "auto_labeled_baseline_vs_reviewed_retrain"
     assert training_comparison_context["datasets_identical"] is True
+    al_comparison_context = json.loads((tmp_path / "data" / "interim" / "al_comparison.json").read_text(encoding="utf-8"))
+    assert {"entropy", "random"}.issubset(set(al_comparison_context["strategies"]))
     review_queue_context = json.loads((tmp_path / "data" / "interim" / "review_queue_context.json").read_text(encoding="utf-8"))
     assert review_queue_context["confidence_threshold"] == loaded_config.annotation.confidence_threshold
     assert review_queue_context["n_rows"] >= 0
@@ -130,6 +133,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert "../final_report.md" in dashboard_html
     assert "review_agreement_report.md" in dashboard_html
     assert "training_comparison_report.md" in dashboard_html
+    assert "al_comparison_report.md" in dashboard_html
     assert "review_workspace.html" in dashboard_html
     assert "online_governance_report.md" in dashboard_html
     assert "Cleaned word cloud" in dashboard_html
@@ -145,6 +149,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert captured_report["summary"]["dashboard"]["dashboard_path"] == "reports/run_dashboard.html"
     assert captured_report["summary"]["dashboard"]["final_report_path"] == "final_report.md"
     assert captured_report["summary"]["approval"]["approval_status"] == "skipped_missing_file"
+    assert captured_report["summary"]["active_learning"]["al_comparison_report_path"] == "reports/al_comparison_report.md"
     assert captured_report["summary"]["training_comparison"]["comparison_report_path"] == "reports/training_comparison_report.md"
     assert Path(captured_report["summary"]["annotation"]["annotation_trace_report_path"]).as_posix() == "reports/annotation_trace_report.md"
     assert Path(captured_report["summary"]["annotation"]["annotation_trace_context_path"]).as_posix() == "data/interim/annotation_trace.json"

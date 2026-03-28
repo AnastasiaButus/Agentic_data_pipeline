@@ -243,6 +243,40 @@ def test_training_comparison_report_and_context_are_created(tmp_path: Path) -> N
     assert context["review_status"] == "merged"
 
 
+def test_al_comparison_report_and_context_are_created(tmp_path: Path) -> None:
+    """AL comparison reporting should produce both markdown and machine-readable artifacts."""
+
+    service = ReportingService(_make_context(tmp_path))
+    summary = {
+        "comparison_scope": "entropy_vs_random_active_learning",
+        "strategies": ["entropy", "random"],
+        "best_strategy": "entropy",
+        "delta_accuracy_entropy_minus_random": 0.05,
+        "delta_f1_entropy_minus_random": 0.04,
+        "final_by_strategy": {
+            "entropy": {"iteration": 3, "n_labeled": 90, "accuracy": 0.81, "f1": 0.79},
+            "random": {"iteration": 3, "n_labeled": 90, "accuracy": 0.76, "f1": 0.75},
+        },
+        "rows": [
+            {"strategy": "entropy", "iteration": 1, "n_labeled": 60, "accuracy": 0.7, "f1": 0.68},
+            {"strategy": "random", "iteration": 1, "n_labeled": 60, "accuracy": 0.66, "f1": 0.64},
+        ],
+        "notes": ["Entropy and random are compared on the same offline text baseline."],
+    }
+
+    report_path = service.write_al_comparison_report(summary)
+    context_path = service.write_al_comparison_context(summary)
+
+    report = (tmp_path / report_path).read_text(encoding="utf-8")
+    context = json.loads((tmp_path / context_path).read_text(encoding="utf-8"))
+
+    assert "Active Learning Comparison Report" in report
+    assert "best_strategy: entropy" in report
+    assert "delta_f1_entropy_minus_random: 0.04" in report
+    assert "## Final strategy snapshot" in report
+    assert context["best_strategy"] == "entropy"
+
+
 def test_source_report_and_approval_candidates_include_compliance_fields(tmp_path: Path) -> None:
     """Approval-facing source artifacts should surface license and robots metadata explicitly."""
 
@@ -396,6 +430,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     service.registry.save_markdown("reports/online_governance_report.md", "# Online Governance\n")
     service.registry.save_markdown("reports/review_agreement_report.md", "# Agreement\n")
     service.registry.save_markdown("reports/training_comparison_report.md", "# Training Comparison\n")
+    service.registry.save_markdown("reports/al_comparison_report.md", "# Active Learning Comparison\n")
     service.registry.save_text("reports/review_workspace.html", "<html><body>Review Workspace</body></html>")
     service.registry.save_text("reports/eda_report.html", "<html><body>EDA</body></html>")
     service.registry.save_markdown("reports/review_queue_report.md", "# Review Queue\n")
@@ -505,7 +540,11 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
             "approved_sources_path": "data/raw/approved_sources.json",
             "approval_status": "skipped_missing_file",
         },
-        "active_learning": {"al_report_path": "reports/al_report.md"},
+        "active_learning": {
+            "al_report_path": "reports/al_report.md",
+            "al_comparison_report_path": "reports/al_comparison_report.md",
+            "al_comparison_context_path": "data/interim/al_comparison.json",
+        },
         "training": {"accuracy": 1.0, "f1": 1.0},
         "artifacts": {
             "metrics_path": str(tmp_path / "data" / "interim" / "model_metrics.json"),
@@ -523,6 +562,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     assert 'href="eda_report.html"' in html
     assert 'href="review_agreement_report.md"' in html
     assert 'href="training_comparison_report.md"' in html
+    assert 'href="al_comparison_report.md"' in html
     assert 'href="review_workspace.html"' in html
     assert 'href="online_governance_report.md"' in html
     assert "../data/interim/model_artifact.pkl" in html

@@ -555,13 +555,52 @@ class ReportingService:
         self.registry.save_markdown(path, "\n".join(lines))
         return path
 
-    def write_al_comparison_report(self, rows: list[dict[str, Any]]) -> str:
-        """Write a compact markdown summary for AL strategy comparison rows.
+    def write_al_comparison_report(self, payload: Any) -> str:
+        """Write a compact markdown summary for AL strategy comparison rows and final deltas."""
 
-        The report stays table-based so it remains offline-safe and easy to inspect in plain text.
-        """
+        if isinstance(payload, dict):
+            rows = payload.get("rows", []) if isinstance(payload.get("rows"), list) else []
+            final_by_strategy = payload.get("final_by_strategy", {}) if isinstance(payload.get("final_by_strategy"), dict) else {}
+            strategies = payload.get("strategies", []) if isinstance(payload.get("strategies"), list) else []
+            notes = payload.get("notes", []) if isinstance(payload.get("notes"), list) else []
+            best_strategy = self._normalize_text(payload.get("best_strategy"))
+            delta_accuracy = payload.get("delta_accuracy_entropy_minus_random")
+            delta_f1 = payload.get("delta_f1_entropy_minus_random")
+        else:
+            rows = payload if isinstance(payload, list) else []
+            final_by_strategy = {}
+            strategies = sorted({self._normalize_text(row.get("strategy")) for row in rows if self._normalize_text(row.get("strategy"))})
+            notes = []
+            best_strategy = ""
+            delta_accuracy = None
+            delta_f1 = None
 
         lines = ["# Active Learning Comparison Report", ""]
+        lines.append(f"- comparison_scope: entropy_vs_random_active_learning")
+        lines.append(f"- strategies: {', '.join(strategies) if strategies else 'n/a'}")
+        lines.append(f"- best_strategy: {best_strategy or 'n/a'}")
+        lines.append(
+            f"- delta_accuracy_entropy_minus_random: {self._format_numeric(delta_accuracy) if delta_accuracy is not None else 'n/a'}"
+        )
+        lines.append(
+            f"- delta_f1_entropy_minus_random: {self._format_numeric(delta_f1) if delta_f1 is not None else 'n/a'}"
+        )
+
+        if final_by_strategy:
+            lines.extend(["", "## Final strategy snapshot"])
+            for strategy in sorted(final_by_strategy):
+                row = final_by_strategy[strategy]
+                lines.append(
+                    "- {strategy}: iteration={iteration} n_labeled={n_labeled} accuracy={accuracy} f1={f1}".format(
+                        strategy=strategy,
+                        iteration=row.get("iteration", ""),
+                        n_labeled=row.get("n_labeled", ""),
+                        accuracy=self._format_numeric(row.get("accuracy")),
+                        f1=self._format_numeric(row.get("f1")),
+                    )
+                )
+
+        lines.extend(["", "## Iteration table"])
         lines.append("| strategy | iteration | n_labeled | accuracy | f1 |")
         lines.append("| --- | ---: | ---: | ---: | ---: |")
         for row in rows:
@@ -575,9 +614,21 @@ class ReportingService:
                 )
             )
 
+        if notes:
+            lines.extend(["", "## Notes"])
+            for note in notes:
+                lines.append(f"- {self._normalize_text(note)}")
+
         path = "reports/al_comparison_report.md"
         self.registry.save_markdown(path, "\n".join(lines))
         return path
+
+    def write_al_comparison_context(self, payload: dict[str, Any]) -> str:
+        """Write the machine-readable AL strategy comparison payload."""
+
+        path = Path("data/interim/al_comparison.json")
+        self.registry.save_json(path, payload)
+        return str(path)
 
     def write_review_queue_report(
         self,
@@ -1420,6 +1471,7 @@ class ReportingService:
         review = summary.get("review", {}) if isinstance(summary.get("review"), dict) else {}
         agreement = summary.get("agreement", {}) if isinstance(summary.get("agreement"), dict) else {}
         approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
+        active_learning = summary.get("active_learning", {}) if isinstance(summary.get("active_learning"), dict) else {}
         training_comparison = summary.get("training_comparison", {}) if isinstance(summary.get("training_comparison"), dict) else {}
         training = summary.get("training", {}) if isinstance(summary.get("training"), dict) else {}
         eda_context_payload = self._load_json_artifact(eda.get("eda_context_path"))
@@ -1494,6 +1546,11 @@ class ReportingService:
                 "label": "Open training comparison",
                 "path": training_comparison.get("comparison_report_path"),
                 "description": "Baseline auto-label metrics versus the reviewed retrain on the same local TF-IDF + LogReg stack.",
+            },
+            {
+                "label": "Open AL comparison",
+                "path": active_learning.get("al_comparison_report_path"),
+                "description": "Entropy versus random strategy comparison for the offline active-learning loop.",
             },
             {
                 "label": "Open source shortlist",
@@ -2031,6 +2088,7 @@ class ReportingService:
                     {"label": "Review guide", "path": review.get("review_queue_report_path"), "note": "Инструкция по HITL и объяснение следующего шага."},
                     {"label": "Review merge report", "path": review.get("review_merge_report_path"), "note": "Результат ручного merge и post-review status."},
                     {"label": "Active learning report", "path": active_learning.get("al_report_path"), "note": "История AL-итераций после review."},
+                    {"label": "AL comparison report", "path": active_learning.get("al_comparison_report_path"), "note": "Сравнение стратегий entropy и random в одном offline AL цикле."},
                     {"label": "Review agreement report", "path": agreement.get("agreement_report_path"), "note": "Auto-vs-human agreement and Cohen's kappa for the reviewed subset."},
                     {"label": "Training comparison report", "path": training_comparison.get("comparison_report_path"), "note": "Сравнение baseline auto-label metrics и retrain после review/HITL."},
                 ],
@@ -2059,6 +2117,7 @@ class ReportingService:
                 "items": [
                     {"label": "EDA context", "path": eda.get("eda_context_path"), "note": "JSON summary для EDA/HITL layer."},
                     {"label": "Annotation trace context", "path": annotation.get("annotation_trace_context_path"), "note": "JSON trace annotation contract."},
+                    {"label": "AL comparison context", "path": active_learning.get("al_comparison_context_path"), "note": "Machine-readable entropy-vs-random AL comparison payload."},
                     {"label": "Training comparison context", "path": training_comparison.get("comparison_context_path"), "note": "Machine-readable baseline-vs-reviewed retrain summary."},
                     {"label": "Model metrics", "path": artifacts.get("metrics_path"), "note": "Финальные метрики baseline-модели."},
                     {"label": "Model artifact", "path": artifacts.get("model_path"), "note": "Сериализованный классификатор TF-IDF + LogReg."},

@@ -119,3 +119,19 @@ def test_compare_strategies_returns_entropy_and_random_rows(tmp_path: Path) -> N
     assert {"entropy", "random"}.issubset({row["strategy"] for row in rows})
     for row in rows:
         assert {"strategy", "iteration", "n_labeled", "accuracy", "f1"}.issubset(row.keys())
+
+
+def test_summarize_strategy_comparison_returns_final_deltas(tmp_path: Path) -> None:
+    """The AL comparison summary should expose final metrics and entropy-vs-random deltas."""
+
+    agent = ActiveLearningAgent(_make_context(tmp_path), registry=FakeRegistry(), random_state=13)
+    rows = agent.compare_strategies(_synthetic_records(), strategies=("entropy", "random"), seed_size=50, n_iterations=2, batch_size=20)
+
+    summary = agent.summarize_strategy_comparison(rows)
+
+    assert summary["comparison_scope"] == "entropy_vs_random_active_learning"
+    assert {"entropy", "random"}.issubset(summary["strategies"])
+    assert "entropy" in summary["final_by_strategy"]
+    assert "random" in summary["final_by_strategy"]
+    assert "best_strategy" in summary
+    assert "delta_f1_entropy_minus_random" in summary

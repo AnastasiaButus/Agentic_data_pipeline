@@ -174,7 +174,8 @@ flowchart LR
 - entropy;
 - random;
 - offline simulation loop;
-- learning history.
+- learning history;
+- comparison report `entropy vs random` для финального качества и числа размеченных примеров.
 
 ### 7. `TrainingService`
 
@@ -355,6 +356,8 @@ LLM используется только там, где он действите
 - `reports/review_merge_report.md`
 - `data/interim/review_agreement_context.json`
 - `reports/review_agreement_report.md`
+- `reports/al_comparison_report.md`
+- `data/interim/al_comparison.json`
 - `reports/training_comparison_report.md`
 - `data/interim/training_comparison.json`
 - `data/interim/model_metrics.json`

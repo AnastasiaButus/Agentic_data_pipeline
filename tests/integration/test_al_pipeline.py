@@ -15,12 +15,17 @@ class FakeRegistry:
 
     def __init__(self) -> None:
         self.markdown_writes: dict[str, str] = {}
+        self.json_writes: dict[str, object] = {}
 
     def save_dataframe(self, path: str | Path, df: object) -> Path:
         return Path(path)
 
     def save_markdown(self, path: str | Path, content: str) -> Path:
         self.markdown_writes[str(path)] = content
+        return Path(path)
+
+    def save_json(self, path: str | Path, payload: object) -> Path:
+        self.json_writes[str(path)] = payload
         return Path(path)
 
 
@@ -73,7 +78,9 @@ def test_al_pipeline_runs_multiple_iterations_with_entropy_and_random(tmp_path: 
     entropy_history, entropy_labeled = entropy_agent.run_cycle(records, strategy="entropy", seed_size=50, n_iterations=5, batch_size=20)
     random_history, random_labeled = random_agent.run_cycle(records, strategy="random", seed_size=50, n_iterations=5, batch_size=20)
     comparison_rows = entropy_agent.compare_strategies(records, strategies=("entropy", "random"), seed_size=50, n_iterations=2, batch_size=20)
-    comparison_report = reporting.write_al_comparison_report(comparison_rows)
+    comparison_summary = entropy_agent.summarize_strategy_comparison(comparison_rows)
+    comparison_report = reporting.write_al_comparison_report(comparison_summary)
+    comparison_context = reporting.write_al_comparison_context(comparison_summary)
 
     assert len(entropy_history) >= 2
     assert len(random_history) >= 2
@@ -84,7 +91,9 @@ def test_al_pipeline_runs_multiple_iterations_with_entropy_and_random(tmp_path: 
     assert comparison_rows
     assert {"entropy", "random"}.issubset({row["strategy"] for row in comparison_rows})
     assert comparison_report == "reports/al_comparison_report.md"
+    assert Path(comparison_context).as_posix() == "data/interim/al_comparison.json"
     markdown = registry.markdown_writes[comparison_report]
+    assert "best_strategy" in markdown
     assert "strategy" in markdown
     assert "iteration" in markdown
     assert "n_labeled" in markdown

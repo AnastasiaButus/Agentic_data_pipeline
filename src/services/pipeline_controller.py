@@ -196,6 +196,15 @@ class PipelineController:
             batch_size=al_batch_size,
         )
         al_report_path = self.reporting_service.write_al_report(al_history)
+        al_comparison_payload = self._build_active_learning_comparison_payload(
+            reviewed,
+            entropy_history=al_history,
+            seed_size=al_seed_size,
+            n_iterations=al_iterations,
+            batch_size=al_batch_size,
+        )
+        al_comparison_report_path = self.reporting_service.write_al_comparison_report(al_comparison_payload)
+        al_comparison_context_path = self.reporting_service.write_al_comparison_context(al_comparison_payload)
 
         artifacts, training_metrics = self.training_service.train(al_labeled)
         reviewer_action = (
@@ -282,6 +291,12 @@ class PipelineController:
             },
             "active_learning": {
                 "al_report_path": al_report_path,
+                "al_comparison_report_path": al_comparison_report_path,
+                "al_comparison_context_path": al_comparison_context_path,
+                "comparison_scope": al_comparison_payload.get("comparison_scope"),
+                "best_strategy": al_comparison_payload.get("best_strategy"),
+                "delta_f1_entropy_minus_random": al_comparison_payload.get("delta_f1_entropy_minus_random"),
+                "delta_accuracy_entropy_minus_random": al_comparison_payload.get("delta_accuracy_entropy_minus_random"),
                 "history": al_history,
             },
             "training_comparison": {
@@ -362,6 +377,8 @@ class PipelineController:
                 "review_agreement_report": review_agreement_report_path,
                 "review_agreement_context": review_agreement_context_path,
                 "al_report": al_report_path,
+                "al_comparison_report": al_comparison_report_path,
+                "al_comparison_context": al_comparison_context_path,
                 "training_comparison_report": training_comparison_report_path,
                 "training_comparison_context": training_comparison_context_path,
                 "dashboard": dashboard_path,
@@ -556,3 +573,62 @@ class PipelineController:
         summary["corrected_queue_found"] = corrected_queue_found
         summary["n_effect_label_changes"] = n_effect_label_changes
         return summary
+
+    def _build_active_learning_comparison_payload(
+        self,
+        reviewed: Any,
+        *,
+        entropy_history: list[dict[str, Any]],
+        seed_size: int,
+        n_iterations: int,
+        batch_size: int,
+    ) -> dict[str, Any]:
+        """Build a resilient entropy-vs-random comparison payload for active learning."""
+
+        compare_helper = getattr(self.active_learning_agent, "compare_strategies", None)
+        summarize_helper = getattr(self.active_learning_agent, "summarize_strategy_comparison", None)
+
+        if callable(compare_helper):
+            rows = compare_helper(
+                reviewed,
+                strategies=("entropy", "random"),
+                seed_size=seed_size,
+                n_iterations=n_iterations,
+                batch_size=batch_size,
+            )
+            if callable(summarize_helper):
+                payload = summarize_helper(rows)
+            else:
+                payload = {
+                    "comparison_scope": "entropy_vs_random_active_learning",
+                    "strategies": sorted({self._normalize_text(row.get("strategy")) for row in rows if self._normalize_text(row.get("strategy"))}),
+                    "rows": rows,
+                    "final_by_strategy": {},
+                    "delta_accuracy_entropy_minus_random": None,
+                    "delta_f1_entropy_minus_random": None,
+                    "best_strategy": "",
+                    "notes": ["Active-learning comparison rows were produced, but no summary helper is available for this agent."],
+                }
+            return payload
+
+        return {
+            "comparison_scope": "entropy_vs_random_active_learning",
+            "strategies": ["entropy"],
+            "rows": [
+                {
+                    "strategy": "entropy",
+                    "iteration": row.get("iteration"),
+                    "n_labeled": row.get("n_labeled"),
+                    "accuracy": row.get("accuracy"),
+                    "f1": row.get("f1"),
+                }
+                for row in entropy_history
+            ],
+            "final_by_strategy": {"entropy": entropy_history[-1]} if entropy_history else {},
+            "delta_accuracy_entropy_minus_random": None,
+            "delta_f1_entropy_minus_random": None,
+            "best_strategy": "entropy" if entropy_history else "",
+            "notes": [
+                "The injected active-learning agent does not expose strategy comparison helpers, so only the main entropy run is reported.",
+            ],
+        }

@@ -312,6 +312,71 @@ class ActiveLearningAgent(BaseAgent):
 
         return comparison_rows
 
+    def summarize_strategy_comparison(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        """Summarize the final AL outcomes for entropy and random in a report-friendly shape."""
+
+        strategies: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            strategy = str(row.get("strategy", "")).strip().lower()
+            if not strategy:
+                continue
+            strategies.setdefault(strategy, []).append(dict(row))
+
+        final_by_strategy: dict[str, dict[str, Any]] = {}
+        for strategy, strategy_rows in strategies.items():
+            if not strategy_rows:
+                continue
+            ordered = sorted(
+                strategy_rows,
+                key=lambda item: (
+                    int(item.get("iteration", 0) or 0),
+                    int(item.get("n_labeled", 0) or 0),
+                ),
+            )
+            final_by_strategy[strategy] = ordered[-1]
+
+        entropy_final = final_by_strategy.get("entropy")
+        random_final = final_by_strategy.get("random")
+        delta_accuracy = None
+        delta_f1 = None
+        if entropy_final and random_final:
+            delta_accuracy = float(entropy_final.get("accuracy", 0.0)) - float(random_final.get("accuracy", 0.0))
+            delta_f1 = float(entropy_final.get("f1", 0.0)) - float(random_final.get("f1", 0.0))
+
+        best_strategy = ""
+        if final_by_strategy:
+            best_strategy = max(
+                final_by_strategy.items(),
+                key=lambda item: (
+                    float(item[1].get("f1", 0.0)),
+                    float(item[1].get("accuracy", 0.0)),
+                    -int(item[1].get("n_labeled", 0) or 0),
+                ),
+            )[0]
+
+        notes: list[str] = []
+        if entropy_final and random_final:
+            notes.append("Entropy and random are compared on the same offline text baseline with identical seed, iteration, and batch-size settings.")
+            if delta_f1 is not None and delta_f1 > 0:
+                notes.append("Entropy finishes with a higher macro-F1 than random for this run.")
+            elif delta_f1 is not None and delta_f1 < 0:
+                notes.append("Random finishes with a higher macro-F1 than entropy for this run.")
+            else:
+                notes.append("Entropy and random finish with the same macro-F1 for this run.")
+        else:
+            notes.append("Not enough strategy rows were produced to compare entropy and random.")
+
+        return {
+            "comparison_scope": "entropy_vs_random_active_learning",
+            "strategies": sorted(strategies.keys()),
+            "rows": rows,
+            "final_by_strategy": final_by_strategy,
+            "delta_accuracy_entropy_minus_random": delta_accuracy,
+            "delta_f1_entropy_minus_random": delta_f1,
+            "best_strategy": best_strategy,
+            "notes": notes,
+        }
+
     def _filter_labeled_records(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Keep only rows with usable text and effect labels for the AL baseline."""
 

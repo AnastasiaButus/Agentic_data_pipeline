@@ -34,6 +34,8 @@ def test_demo_minecraft_config_switch_runs_end_to_end(tmp_path: Path) -> None:
     assert exit_code == 0
     assert (tmp_path / "final_report.md").exists()
     assert (tmp_path / "reports" / "run_dashboard.html").exists()
+    assert (tmp_path / "reports" / "al_comparison_report.md").exists()
+    assert (tmp_path / "data" / "interim" / "al_comparison.json").exists()
     assert (tmp_path / "data" / "interim" / "model_metrics.json").exists()
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert "Minecraft Instructions Offline Demo" in (tmp_path / "data" / "raw" / "discovered_sources.json").read_text(encoding="utf-8")

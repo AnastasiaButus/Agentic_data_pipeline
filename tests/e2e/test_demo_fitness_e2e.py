@@ -56,11 +56,14 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert "## Approval" in final_report
     assert "## Dashboard" in final_report
     assert "## EDA" in final_report
+    assert "## EDA Hypotheses" in final_report
     assert "## Annotation" in final_report
     assert "## Agreement" in final_report
     assert "## Training Comparison" in final_report
     assert "eda_report_path" in final_report
     assert "eda_context_path" in final_report
+    assert "hypotheses_report_path: reports/eda_hypotheses_report.md" in final_report
+    assert "hypotheses_context_path: data/interim/eda_hypotheses_context.json" in final_report
     assert "annotation_trace_report_path" in final_report
     assert "annotation_trace_context_path" in final_report
     assert "approval_status: skipped_missing_file" in final_report
@@ -112,8 +115,15 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert annotation_trace_context["llm_mode"] == "classify_effect"
     assert annotation_trace_context["n_rows"] >= 0
     eda_report = (tmp_path / "reports" / "eda_report.md").read_text(encoding="utf-8")
+    eda_html_report = (tmp_path / "reports" / "eda_report.html").read_text(encoding="utf-8")
+    eda_hypotheses_report = (tmp_path / "reports" / "eda_hypotheses_report.md").read_text(encoding="utf-8")
+    eda_hypotheses_context = json.loads((tmp_path / "data" / "interim" / "eda_hypotheses_context.json").read_text(encoding="utf-8"))
     assert "EDA-пакет" in eda_report
     assert "Это расширенный честный EDA-отчет" in eda_report
+    assert "LLM-assisted EDA hypotheses" in eda_report
+    assert "LLM-assisted EDA hypotheses" in eda_html_report
+    assert "EDA Hypotheses Report" in eda_hypotheses_report
+    assert eda_hypotheses_context["n_hypotheses"] >= 1
     eda_context = json.loads((tmp_path / "data" / "interim" / "eda_context.json").read_text(encoding="utf-8"))
     assert "n_rows" in eda_context
     assert "columns" in eda_context
@@ -157,10 +167,12 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert "runtime_settings.html" in dashboard_html
     assert "online_governance_report.md" in dashboard_html
     assert "Cleaned word cloud" in dashboard_html
+    assert "EDA hypotheses center" in dashboard_html
     assert "HITL control center" in dashboard_html
     assert "LLM annotation center" in dashboard_html
     assert "Settings and gate status" in dashboard_html
     assert "offline_mock_llm_active" in dashboard_html
+    assert "eda_hypotheses_report.md" in dashboard_html
     assert "review_queue_corrected.csv" in dashboard_html
     assert "Approval next step" in dashboard_html
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
@@ -183,4 +195,6 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert Path(captured_report["summary"]["annotation"]["annotation_trace_context_path"]).as_posix() == "data/interim/annotation_trace.json"
     assert Path(captured_report["summary"]["eda"]["eda_report_path"]).as_posix() == "reports/eda_report.md"
     assert Path(captured_report["summary"]["eda"]["eda_context_path"]).as_posix() == "data/interim/eda_context.json"
+    assert Path(captured_report["summary"]["eda_hypotheses"]["hypotheses_report_path"]).as_posix() == "reports/eda_hypotheses_report.md"
+    assert Path(captured_report["summary"]["eda_hypotheses"]["hypotheses_context_path"]).as_posix() == "data/interim/eda_hypotheses_context.json"
     

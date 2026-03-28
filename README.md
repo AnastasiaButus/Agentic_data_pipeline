@@ -441,6 +441,8 @@ LLM используется только там, где он действите
 - `reports/eda_report.md`
 - `reports/eda_report.html`
 - `data/interim/eda_context.json`
+- `reports/eda_hypotheses_report.md`
+- `data/interim/eda_hypotheses_context.json`
 - `reports/annotation_report.md`
 - `reports/annotation_trace_report.md`
 - `data/interim/annotation_trace.json`
@@ -505,7 +507,7 @@ python run_pipeline.py --config configs/demo_fitness.yaml --open-review-workspac
 
 `reports/run_dashboard.html` теперь также показывает cleaned word cloud, собранное из post-quality `text`, чтобы перед retrain можно было быстро проверить тематический фокус очищенных данных.
 CLI теперь также печатает в терминал абсолютные пути и `file:///`-ссылки к dashboard, final report, EDA HTML и review workspace, чтобы после первого запуска не искать их вручную.
-Dashboard теперь дополнительно содержит `HITL control center` и `LLM annotation center`: там видно очередь ручной проверки, allowed labels, статус corrected queue, активный annotation path, provider/fallback state и быстрые переходы к review/annotation артефактам.
+Dashboard теперь дополнительно содержит `HITL control center`, `LLM annotation center` и `EDA hypotheses center`: там видно очередь ручной проверки, allowed labels, статус corrected queue, активный annotation path, provider/fallback state, а также advisory-only гипотезы по `eda_context.json` с переходами в source approval и review workspace.
 
 ### Основная CLI-команда
 

@@ -119,6 +119,40 @@ def test_gemini_client_builds_json_first_request_and_extracts_text() -> None:
     assert captured["body"]["generationConfig"]["responseMimeType"] == "application/json"
 
 
+def test_gemini_client_generate_with_schema_uses_caller_schema() -> None:
+    """Structured callers should be able to override the default annotation schema safely."""
+
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return json.dumps({"text": '{"status": "ok"}'}, ensure_ascii=False).encode("utf-8")
+
+    def fake_opener(request, timeout):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    custom_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"status": {"type": "string"}},
+        "required": ["status"],
+    }
+
+    client = GeminiClient(api_key="test-key", opener=fake_opener)
+
+    response_text = client.generate_with_schema("Return JSON only", custom_schema)
+
+    assert response_text == '{"status": "ok"}'
+    assert captured["body"]["generationConfig"]["responseJsonSchema"] == custom_schema
+
+
 def test_pipeline_controller_selects_annotation_provider_explicitly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Controller selection should follow llm_provider, not environment-only heuristics."""
 

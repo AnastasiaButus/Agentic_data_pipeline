@@ -13,6 +13,7 @@ from src.core.context import PipelineContext
 from src.core.runtime import build_runtime_summary
 from src.providers.llm.gemini_client import GeminiClient
 from src.providers.llm.mock_llm import MockLLM
+from src.services.eda_hypothesis_service import EDAHypothesisService
 from src.services.review_queue_service import CORRECTED_QUEUE_PATH, ReviewQueueService
 from src.services.review_agreement import build_review_agreement_summary
 from src.services.reporting_service import ReportingService
@@ -35,6 +36,7 @@ class PipelineController:
         active_learning_agent: ActiveLearningAgent | None = None,
         training_service: TrainingService | None = None,
         reporting_service: ReportingService | None = None,
+        eda_hypothesis_service: EDAHypothesisService | None = None,
     ) -> None:
         """Bind the controller to the active context and optionally injected components."""
 
@@ -51,6 +53,11 @@ class PipelineController:
         self.active_learning_agent = active_learning_agent if active_learning_agent is not None else ActiveLearningAgent(ctx)
         self.training_service = training_service if training_service is not None else TrainingService(ctx)
         self.reporting_service = reporting_service if reporting_service is not None else ReportingService(ctx)
+        self.eda_hypothesis_service = (
+            eda_hypothesis_service
+            if eda_hypothesis_service is not None
+            else EDAHypothesisService(ctx, llm_client=getattr(self.annotation_agent, "llm_client", None))
+        )
 
     def _build_annotation_llm_client(self) -> Any | None:
         """Select the annotation provider explicitly from config while keeping the offline baseline stable."""
@@ -99,20 +106,29 @@ class PipelineController:
         quality_report = self.quality_agent.detect_issues(collected)
         cleaned = self.quality_agent.run(collected)
         quality_report_path = self.reporting_service.write_quality_report(quality_report)
-        eda_report_path = self.reporting_service.write_eda_report(
-            cleaned,
-            raw_df_like=collected,
-            quality_report=quality_report,
-        )
         eda_context_path = self.reporting_service.write_eda_context(
             cleaned,
             raw_df_like=collected,
             quality_report=quality_report,
         )
+        try:
+            eda_context_payload = self.reporting_service.registry.load_json(eda_context_path)
+        except Exception:
+            eda_context_payload = {}
+        eda_hypothesis_summary = self.eda_hypothesis_service.build_summary(eda_context_payload)
+        eda_report_path = self.reporting_service.write_eda_report(
+            cleaned,
+            raw_df_like=collected,
+            quality_report=quality_report,
+            eda_hypotheses=eda_hypothesis_summary,
+        )
+        eda_hypotheses_report_path = self.reporting_service.write_eda_hypotheses_report(eda_hypothesis_summary)
+        eda_hypotheses_context_path = self.reporting_service.write_eda_hypotheses_context(eda_hypothesis_summary)
         eda_html_report_path = self.reporting_service.write_eda_html_report(
             cleaned,
             raw_df_like=collected,
             quality_report=quality_report,
+            eda_hypotheses=eda_hypothesis_summary,
         )
 
         annotated = self.annotation_agent.auto_label(cleaned)
@@ -276,6 +292,19 @@ class PipelineController:
                 "eda_context_path": eda_context_path,
                 "n_rows": len(self._to_records(cleaned)),
             },
+            "eda_hypotheses": {
+                "hypotheses_report_path": eda_hypotheses_report_path,
+                "hypotheses_context_path": eda_hypotheses_context_path,
+                "hypothesis_mode": eda_hypothesis_summary.get("hypothesis_mode"),
+                "requested_provider": eda_hypothesis_summary.get("requested_provider"),
+                "resolved_provider": eda_hypothesis_summary.get("resolved_provider"),
+                "provider_status": eda_hypothesis_summary.get("provider_status"),
+                "n_hypotheses": eda_hypothesis_summary.get("n_hypotheses"),
+                "overall_note": eda_hypothesis_summary.get("overall_note"),
+                "hitl_followups": eda_hypothesis_summary.get("hitl_followups"),
+                "hypotheses": eda_hypothesis_summary.get("hypotheses"),
+                "notes": eda_hypothesis_summary.get("notes"),
+            },
             "annotation": {
                 "annotation_report_path": annotation_report_path,
                 "annotation_trace_report_path": annotation_trace_report_path,
@@ -415,6 +444,8 @@ class PipelineController:
                 "eda_report": eda_report_path,
                 "eda_html_report": eda_html_report_path,
                 "eda_context": eda_context_path,
+                "eda_hypotheses_report": eda_hypotheses_report_path,
+                "eda_hypotheses_context": eda_hypotheses_context_path,
                 "annotation_report": annotation_report_path,
                 "annotation_trace_report": annotation_trace_report_path,
                 "annotation_trace_context": annotation_trace_context_path,

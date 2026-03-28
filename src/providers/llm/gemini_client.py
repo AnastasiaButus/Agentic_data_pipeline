@@ -44,10 +44,23 @@ class GeminiClient(BaseLLM):
         response_body = self._post_json(request_body)
         return self._extract_text(response_body)
 
-    def build_request_payload(self, prompt: str) -> dict[str, Any]:
+    def generate_with_schema(self, prompt: str, response_schema: dict[str, Any]) -> str:
+        """Generate structured JSON output with a caller-provided response schema."""
+
+        if not self.api_key:
+            raise ValueError("Gemini API key is required")
+
+        request_body = self.build_request_payload(prompt, response_schema=response_schema)
+        response_body = self._post_json(request_body)
+        return self._extract_text(response_body)
+
+    def build_request_payload(self, prompt: str, response_schema: dict[str, Any] | None = None) -> dict[str, Any]:
         """Build the JSON-first Gemini request body for the annotation contract."""
 
-        effect_labels = self._extract_effect_labels(prompt)
+        schema = response_schema
+        if schema is None:
+            effect_labels = self._extract_effect_labels(prompt)
+            schema = self._build_response_schema(effect_labels)
         return {
             "contents": [
                 {
@@ -58,7 +71,7 @@ class GeminiClient(BaseLLM):
             "generationConfig": {
                 "temperature": 0.0,
                 "responseMimeType": "application/json",
-                "responseJsonSchema": self._build_response_schema(effect_labels),
+                "responseJsonSchema": schema,
             },
         }
 

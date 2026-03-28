@@ -54,12 +54,15 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "## Online Governance" in final_report
     assert "## Approval" in final_report
     assert "## EDA" in final_report
+    assert "## EDA Hypotheses" in final_report
     assert "## Annotation" in final_report
     assert "## Agreement" in final_report
     assert "## Training Comparison" in final_report
     assert "eda_report_path" in final_report
     assert "eda_html_report_path" in final_report
     assert "eda_context_path" in final_report
+    assert "hypotheses_report_path: reports/eda_hypotheses_report.md" in final_report
+    assert "hypotheses_context_path: data/interim/eda_hypotheses_context.json" in final_report
     assert "annotation_trace_report_path" in final_report
     assert "annotation_trace_context_path" in final_report
     assert "approval_status: skipped_missing_file" in final_report
@@ -128,13 +131,19 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert annotation_trace_context["n_rows"] >= 0
     eda_report = (tmp_path / "reports" / "eda_report.md").read_text(encoding="utf-8")
     eda_html_report = (tmp_path / "reports" / "eda_report.html").read_text(encoding="utf-8")
+    eda_hypotheses_report = (tmp_path / "reports" / "eda_hypotheses_report.md").read_text(encoding="utf-8")
+    eda_hypotheses_context = json.loads((tmp_path / "data" / "interim" / "eda_hypotheses_context.json").read_text(encoding="utf-8"))
     assert "EDA-пакет" in eda_report
     assert "Это расширенный честный EDA-отчет" in eda_report
     assert "Raw vs cleaned" in eda_report
     assert "Дубликаты" in eda_report
+    assert "LLM-assisted EDA hypotheses" in eda_report
     assert "source distribution" not in eda_report.lower()
     assert "<html" in eda_html_report.lower()
     assert "EDA Report" in eda_html_report
+    assert "LLM-assisted EDA hypotheses" in eda_html_report
+    assert "EDA Hypotheses Report" in eda_hypotheses_report
+    assert eda_hypotheses_context["n_hypotheses"] >= 1
     eda_context = json.loads((tmp_path / "data" / "interim" / "eda_context.json").read_text(encoding="utf-8"))
     assert "n_rows" in eda_context
     assert "column_count" in eda_context
@@ -186,10 +195,12 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "runtime_settings.html" in dashboard_html
     assert "online_governance_report.md" in dashboard_html
     assert "Cleaned word cloud" in dashboard_html
+    assert "EDA hypotheses center" in dashboard_html
     assert "HITL control center" in dashboard_html
     assert "LLM annotation center" in dashboard_html
     assert "Settings and gate status" in dashboard_html
     assert "offline_mock_llm_active" in dashboard_html
+    assert "eda_hypotheses_report.md" in dashboard_html
     assert "review_queue_report.md" in dashboard_html
     assert "Approval next step" in dashboard_html
     assert "review_queue_corrected.csv" in dashboard_html

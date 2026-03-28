@@ -1339,6 +1339,7 @@ class ReportingService:
         *,
         raw_df_like: Any | None = None,
         quality_report: Any | None = None,
+        eda_hypotheses: dict[str, Any] | None = None,
     ) -> str:
         """Write a compact Russian EDA report for the post-quality dataset."""
 
@@ -1481,6 +1482,31 @@ class ReportingService:
             for note in summary["notes"]:
                 lines.append(f"- {note}")
 
+        if eda_hypotheses and eda_hypotheses.get("hypotheses"):
+            lines.extend(
+                [
+                    "",
+                    "## LLM-assisted EDA hypotheses",
+                    f"- hypothesis_mode: {self._normalize_text(eda_hypotheses.get('hypothesis_mode'))}",
+                    f"- provider_status: {self._normalize_text(eda_hypotheses.get('provider_status'))}",
+                    f"- overall_note: {self._normalize_text(eda_hypotheses.get('overall_note'))}",
+                ]
+            )
+            for index, item in enumerate(eda_hypotheses.get("hypotheses", []), start=1):
+                if not isinstance(item, dict):
+                    continue
+                lines.extend(
+                    [
+                        "",
+                        f"### Hypothesis {index}",
+                        f"- title: {self._normalize_text(item.get('title'))}",
+                        f"- observation: {self._normalize_text(item.get('observation'))}",
+                        f"- hypothesis: {self._normalize_text(item.get('hypothesis'))}",
+                        f"- hitl_action: {self._normalize_text(item.get('hitl_action'))}",
+                        f"- priority: {self._normalize_text(item.get('priority'))}",
+                    ]
+                )
+
         path = Path("reports/eda_report.md")
         self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
         return str(path)
@@ -1509,6 +1535,7 @@ class ReportingService:
         *,
         raw_df_like: Any | None = None,
         quality_report: Any | None = None,
+        eda_hypotheses: dict[str, Any] | None = None,
     ) -> str:
         """Write a self-contained offline HTML EDA report."""
 
@@ -1552,6 +1579,33 @@ class ReportingService:
                     "<ul>" + "".join(f"<li>{self._escape_html(note)}</li>" for note in summary["notes"]) + "</ul>",
                 )
             )
+        if eda_hypotheses and eda_hypotheses.get("hypotheses"):
+            hypothesis_items = []
+            for item in eda_hypotheses.get("hypotheses", []):
+                if not isinstance(item, dict):
+                    continue
+                hypothesis_items.append(
+                    "<li><strong>{title}</strong><br />"
+                    "<span class=\"muted\">Observation:</span> {observation}<br />"
+                    "<span class=\"muted\">Hypothesis:</span> {hypothesis}<br />"
+                    "<span class=\"muted\">HITL action:</span> {hitl_action}<br />"
+                    "<span class=\"muted\">Priority:</span> {priority}</li>".format(
+                        title=self._escape_html(self._normalize_text(item.get("title"))),
+                        observation=self._escape_html(self._normalize_text(item.get("observation"))),
+                        hypothesis=self._escape_html(self._normalize_text(item.get("hypothesis"))),
+                        hitl_action=self._escape_html(self._normalize_text(item.get("hitl_action"))),
+                        priority=self._escape_html(self._normalize_text(item.get("priority"))),
+                    )
+                )
+            sections.append(
+                self._html_metric_block(
+                    "LLM-assisted EDA hypotheses",
+                    "<p>{overall}</p><ul>{items}</ul>".format(
+                        overall=self._escape_html(self._normalize_text(eda_hypotheses.get("overall_note"))),
+                        items="".join(hypothesis_items),
+                    ),
+                )
+            )
 
         html = f"""<!DOCTYPE html>
 <html lang="ru">
@@ -1592,6 +1646,64 @@ class ReportingService:
         path = Path("reports/eda_report.html")
         self.registry.save_text(path, html)
         return str(path)
+
+    def write_eda_hypotheses_report(self, summary: dict[str, Any]) -> str:
+        """Write a human-facing markdown report for EDA hypotheses."""
+
+        lines = [
+            "# EDA Hypotheses Report",
+            "",
+            "Этот отчёт собирает гипотезы по EDA signal-ам. Они advisory-only: человек проверяет их перед изменением quality, approval или retrain логики.",
+            "",
+            f"- hypothesis_mode: {self._normalize_text(summary.get('hypothesis_mode'))}",
+            f"- requested_provider: {self._normalize_text(summary.get('requested_provider'))}",
+            f"- resolved_provider: {self._normalize_text(summary.get('resolved_provider'))}",
+            f"- provider_status: {self._normalize_text(summary.get('provider_status'))}",
+            f"- n_hypotheses: {self._format_numeric(summary.get('n_hypotheses', 0))}",
+            f"- overall_note: {self._normalize_text(summary.get('overall_note'))}",
+        ]
+
+        notes = summary.get("notes", []) if isinstance(summary.get("notes"), list) else []
+        if notes:
+            lines.extend(["", "## Notes"])
+            for note in notes:
+                lines.append(f"- {self._normalize_text(note)}")
+
+        followups = summary.get("hitl_followups", []) if isinstance(summary.get("hitl_followups"), list) else []
+        if followups:
+            lines.extend(["", "## Suggested HITL follow-ups"])
+            for followup in followups:
+                lines.append(f"- {self._normalize_text(followup)}")
+
+        hypotheses = summary.get("hypotheses", []) if isinstance(summary.get("hypotheses"), list) else []
+        if hypotheses:
+            for index, item in enumerate(hypotheses, start=1):
+                if not isinstance(item, dict):
+                    continue
+                lines.extend(
+                    [
+                        "",
+                        f"## Hypothesis {index}",
+                        f"- title: {self._normalize_text(item.get('title'))}",
+                        f"- observation: {self._normalize_text(item.get('observation'))}",
+                        f"- hypothesis: {self._normalize_text(item.get('hypothesis'))}",
+                        f"- hitl_action: {self._normalize_text(item.get('hitl_action'))}",
+                        f"- priority: {self._normalize_text(item.get('priority'))}",
+                    ]
+                )
+        else:
+            lines.extend(["", "## Hypotheses", "- No EDA hypotheses are available for this run."])
+
+        path = Path("reports/eda_hypotheses_report.md")
+        self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
+        return path.as_posix()
+
+    def write_eda_hypotheses_context(self, summary: dict[str, Any]) -> str:
+        """Write the machine-readable EDA hypothesis summary."""
+
+        path = Path("data/interim/eda_hypotheses_context.json")
+        self.registry.save_json(path, summary)
+        return path.as_posix()
 
     def write_annotation_report(self, df_labeled: Any, annotation_summary: dict[str, Any] | None = None) -> str:
         """Write a monitoring report that emphasizes effect labels and confidence."""
@@ -2815,6 +2927,7 @@ class ReportingService:
             "online_governance": "Online Governance",
             "quality": "Quality",
             "eda": "EDA",
+            "eda_hypotheses": "EDA Hypotheses",
             "annotation": "Annotation",
             "review": "Review",
             "agreement": "Agreement",
@@ -2825,7 +2938,7 @@ class ReportingService:
             "training": "Training",
             "artifacts": "Artifacts",
         }
-        for section_name in ["runtime", "dashboard", "sources", "online_governance", "quality", "eda", "annotation", "review", "agreement", "settings", "approval", "active_learning", "training_comparison", "training", "artifacts"]:
+        for section_name in ["runtime", "dashboard", "sources", "online_governance", "quality", "eda", "eda_hypotheses", "annotation", "review", "agreement", "settings", "approval", "active_learning", "training_comparison", "training", "artifacts"]:
             section = summary.get(section_name)
             lines.append(f"## {section_titles[section_name]}")
             lines.append("")
@@ -2915,10 +3028,18 @@ class ReportingService:
         agreement = summary.get("agreement", {}) if isinstance(summary.get("agreement"), dict) else {}
         settings = summary.get("settings", {}) if isinstance(summary.get("settings"), dict) else {}
         approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
+        eda_hypotheses = summary.get("eda_hypotheses", {}) if isinstance(summary.get("eda_hypotheses"), dict) else {}
         active_learning = summary.get("active_learning", {}) if isinstance(summary.get("active_learning"), dict) else {}
         training_comparison = summary.get("training_comparison", {}) if isinstance(summary.get("training_comparison"), dict) else {}
         training = summary.get("training", {}) if isinstance(summary.get("training"), dict) else {}
         eda_context_payload = self._load_json_artifact(eda.get("eda_context_path"))
+        eda_hypotheses_context_payload = self._load_json_artifact(eda_hypotheses.get("hypotheses_context_path"))
+        eda_hypotheses_detail = (
+            dict(eda_hypotheses_context_payload)
+            if isinstance(eda_hypotheses_context_payload, dict)
+            else {}
+        )
+        eda_hypotheses_detail.update(eda_hypotheses)
         annotation_trace_payload = self._load_json_artifact(annotation.get("annotation_trace_context_path"))
         review_queue_context_payload = self._load_json_artifact(review.get("review_queue_context_path"))
         review_queue_preview_rows = self._load_dataframe_artifact_records(
@@ -2970,6 +3091,11 @@ class ReportingService:
                 "label": "Open EDA HTML",
                 "path": eda.get("eda_html_report_path"),
                 "description": "Наглядный HTML-отчёт для демонстрации данных.",
+            },
+            {
+                "label": "Open EDA hypotheses",
+                "path": eda_hypotheses.get("hypotheses_report_path"),
+                "description": "LLM-assisted or heuristic hypotheses grounded in the current EDA context.",
             },
             {
                 "label": "Open review workspace",
@@ -3066,6 +3192,12 @@ class ReportingService:
             dashboard_path,
             settings,
             approval,
+        )
+        eda_hypotheses_panel_html = self._render_dashboard_eda_hypotheses_panel(
+            dashboard_path,
+            eda_hypotheses_detail,
+            approval,
+            review,
         )
 
         next_step = self._normalize_text(dashboard.get("next_step")) or self._normalize_text(review.get("next_step")) or "inspect artifacts"
@@ -3377,6 +3509,12 @@ class ReportingService:
       <h2>Cleaned word cloud</h2>
       <p>Preview of the cleaned post-quality text after lowercasing, punctuation cleanup, and stop-word filtering. It helps quickly verify the current topic focus before HITL and retrain.</p>
       {word_cloud_html}
+    </section>
+
+    <section class="panel" style="margin-top: 20px;">
+      <h2>EDA hypotheses center</h2>
+      <p>These suggestions are grounded in machine-readable EDA context and stay advisory-only: the operator reviews them before changing source approval, quality strategy, or retrain decisions.</p>
+      {eda_hypotheses_panel_html}
     </section>
 
     <section class="panel" style="margin-top: 20px;">
@@ -3861,6 +3999,99 @@ class ReportingService:
             f'<div class="quick-links">{quick_links_html}</div>'
         )
 
+    def _render_dashboard_eda_hypotheses_panel(
+        self,
+        dashboard_path: str,
+        eda_hypotheses: dict[str, Any],
+        approval: dict[str, Any],
+        review: dict[str, Any],
+    ) -> str:
+        """Render EDA hypotheses and route them into explicit operator follow-up."""
+
+        hypothesis_mode = self._normalize_text(eda_hypotheses.get("hypothesis_mode")) or "unknown"
+        requested_provider = self._normalize_text(eda_hypotheses.get("requested_provider")) or "disabled"
+        resolved_provider = self._normalize_text(eda_hypotheses.get("resolved_provider")) or "disabled"
+        provider_status = self._normalize_text(eda_hypotheses.get("provider_status")) or "unknown"
+        overall_note = self._normalize_text(eda_hypotheses.get("overall_note")) or "No EDA hypothesis note is available for this run."
+        n_hypotheses = self._format_numeric(eda_hypotheses.get("n_hypotheses", 0))
+        followups = eda_hypotheses.get("hitl_followups", []) if isinstance(eda_hypotheses.get("hitl_followups"), list) else []
+        hypotheses = eda_hypotheses.get("hypotheses", []) if isinstance(eda_hypotheses.get("hypotheses"), list) else []
+
+        if hypothesis_mode == "llm_generate_parse":
+            callout_class = "callout"
+            callout_note = "Gemini generated the current EDA hypotheses from eda_context.json. Treat them as suggestions and confirm them manually before changing the pipeline."
+        elif "fallback" in hypothesis_mode or "heuristic" in hypothesis_mode:
+            callout_class = "callout warning"
+            callout_note = "This run fell back to deterministic EDA hypotheses. The pipeline remains usable, but the current suggestions were not generated by a live LLM path."
+        else:
+            callout_class = "callout"
+            callout_note = "EDA hypotheses are optional. When unavailable, the operator can still rely on EDA HTML, quality notes, and source approval artifacts."
+
+        quick_links = [
+            {
+                "label": "Open EDA hypotheses report",
+                "path": eda_hypotheses.get("hypotheses_report_path"),
+                "description": "Markdown report with the current hypotheses and suggested HITL follow-ups.",
+                "expected": False,
+            },
+            {
+                "label": "Open source approval workspace",
+                "path": approval.get("source_approval_workspace_path"),
+                "description": "Use this when an EDA hypothesis suggests narrowing or widening the source subset.",
+                "expected": False,
+            },
+            {
+                "label": "Open review workspace",
+                "path": review.get("review_workspace_path"),
+                "description": "Use this when an EDA hypothesis suggests checking low-confidence rows before retrain.",
+                "expected": False,
+            },
+        ]
+        quick_links_html = "".join(
+            self._render_dashboard_link_tile(
+                dashboard_path,
+                item["label"],
+                item["path"],
+                item["description"],
+                expected=bool(item["expected"]),
+            )
+            for item in quick_links
+        )
+
+        if hypotheses:
+            hypothesis_html = "".join(
+                "<li><strong>{title}</strong> — {hypothesis}<br /><span class=\"muted\">Observation:</span> {observation}<br /><span class=\"muted\">HITL action:</span> {hitl_action}<br /><span class=\"muted\">Priority:</span> {priority}</li>".format(
+                    title=self._escape_html(self._normalize_text(item.get("title"))),
+                    hypothesis=self._escape_html(self._normalize_text(item.get("hypothesis"))),
+                    observation=self._escape_html(self._normalize_text(item.get("observation"))),
+                    hitl_action=self._escape_html(self._normalize_text(item.get("hitl_action"))),
+                    priority=self._escape_html(self._normalize_text(item.get("priority"))),
+                )
+                for item in hypotheses
+                if isinstance(item, dict)
+            )
+            hypothesis_list_html = f"<ol class=\"checklist\">{hypothesis_html}</ol>"
+        else:
+            hypothesis_list_html = '<p class="muted" style="margin-top: 14px;">No EDA hypotheses are available for this run.</p>'
+
+        return (
+            f'<div class="{self._escape_html(callout_class)}">{self._escape_html(callout_note)}</div>'
+            '<div class="sub-metric-grid">'
+            f'<div class="sub-metric"><div class="metric-label">Mode</div><div class="metric-value">{self._escape_html(hypothesis_mode)}</div></div>'
+            f'<div class="sub-metric"><div class="metric-label">Requested provider</div><div class="metric-value">{self._escape_html(requested_provider)}</div></div>'
+            f'<div class="sub-metric"><div class="metric-label">Resolved provider</div><div class="metric-value">{self._escape_html(resolved_provider)}</div></div>'
+            f'<div class="sub-metric"><div class="metric-label">Hypotheses</div><div class="metric-value">{self._escape_html(n_hypotheses)}</div></div>'
+            "</div>"
+            '<div class="stack">'
+            f'<p><strong>Provider status:</strong> {self._escape_html(provider_status)}</p>'
+            f'<p><strong>Overall note:</strong> {self._escape_html(overall_note)}</p>'
+            '<div><p><strong>Suggested HITL follow-ups</strong></p>'
+            f'<div class="tag-wrap">{self._render_dashboard_tag_list(followups, empty_label="inspect EDA artifacts")}</div></div>'
+            "</div>"
+            f"{hypothesis_list_html}"
+            f'<div class="quick-links">{quick_links_html}</div>'
+        )
+
     def _render_dashboard_settings_panel(
         self,
         dashboard_path: str,
@@ -3942,6 +4173,7 @@ class ReportingService:
         agreement = summary.get("agreement", {}) if isinstance(summary.get("agreement"), dict) else {}
         settings = summary.get("settings", {}) if isinstance(summary.get("settings"), dict) else {}
         approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
+        eda_hypotheses = summary.get("eda_hypotheses", {}) if isinstance(summary.get("eda_hypotheses"), dict) else {}
         active_learning = summary.get("active_learning", {}) if isinstance(summary.get("active_learning"), dict) else {}
         training_comparison = summary.get("training_comparison", {}) if isinstance(summary.get("training_comparison"), dict) else {}
         artifacts = summary.get("artifacts", {}) if isinstance(summary.get("artifacts"), dict) else {}
@@ -3957,6 +4189,7 @@ class ReportingService:
                     {"label": "Online governance report", "path": online_governance.get("governance_report_path"), "note": "Remote provider limits, auth mode, fallback behavior and operator guidance."},
                     {"label": "EDA markdown", "path": eda.get("eda_report_path"), "note": "Подробный EDA для README/demo narrative."},
                     {"label": "EDA HTML", "path": eda.get("eda_html_report_path"), "note": "Наглядный HTML-отчёт для показа преподавателю."},
+                    {"label": "EDA hypotheses report", "path": eda_hypotheses.get("hypotheses_report_path"), "note": "LLM-assisted or heuristic hypotheses grounded in the current EDA context."},
                     {"label": "Annotation report", "path": annotation.get("annotation_report_path"), "note": "Сводка по effect labels и confidence."},
                     {"label": "Annotation trace report", "path": annotation.get("annotation_trace_report_path"), "note": "Prompt/parser contract и fallback trace."},
                     {"label": "Review guide", "path": review.get("review_queue_report_path"), "note": "Инструкция по HITL и объяснение следующего шага."},
@@ -3991,6 +4224,7 @@ class ReportingService:
                 "title": "Model and machine-readable artifacts",
                 "items": [
                     {"label": "EDA context", "path": eda.get("eda_context_path"), "note": "JSON summary для EDA/HITL layer."},
+                    {"label": "EDA hypotheses context", "path": eda_hypotheses.get("hypotheses_context_path"), "note": "Machine-readable graph-grounded hypotheses and suggested HITL follow-ups."},
                     {"label": "Annotation trace context", "path": annotation.get("annotation_trace_context_path"), "note": "JSON trace annotation contract."},
                     {"label": "AL comparison context", "path": active_learning.get("al_comparison_context_path"), "note": "Machine-readable entropy-vs-random AL comparison payload."},
                     {"label": "Training comparison context", "path": training_comparison.get("comparison_context_path"), "note": "Machine-readable baseline-vs-reviewed retrain summary."},

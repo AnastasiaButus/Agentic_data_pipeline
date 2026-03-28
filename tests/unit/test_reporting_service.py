@@ -125,6 +125,90 @@ def test_eda_html_report_is_created(tmp_path: Path) -> None:
     assert "Charts" in html
 
 
+def test_eda_reports_include_hypotheses_when_supplied(tmp_path: Path) -> None:
+    """Markdown and HTML EDA reports should surface the optional hypothesis layer."""
+
+    service = ReportingService(_make_context(tmp_path))
+    cleaned = _Frame(
+        [
+            {"id": "1", "source": "HF", "text": "energy boost", "rating": 5},
+            {"id": "2", "source": "Web", "text": "side effect warning", "rating": 1},
+        ]
+    )
+    hypotheses = {
+        "hypothesis_mode": "provider_not_supported_heuristic_fallback",
+        "provider_status": "mock_not_supported_for_eda_hypotheses",
+        "overall_note": "Use the suggestions as reviewer prompts only.",
+        "hypotheses": [
+            {
+                "title": "Label concentration",
+                "observation": "energy dominates the cleaned set",
+                "hypothesis": "source mix is narrow",
+                "hitl_action": "check source approval before retrain",
+                "priority": "medium",
+            }
+        ],
+    }
+
+    markdown_path = service.write_eda_report(
+        cleaned,
+        raw_df_like=cleaned,
+        quality_report={"warnings": []},
+        eda_hypotheses=hypotheses,
+    )
+    html_path = service.write_eda_html_report(
+        cleaned,
+        raw_df_like=cleaned,
+        quality_report={"warnings": []},
+        eda_hypotheses=hypotheses,
+    )
+
+    markdown = (tmp_path / markdown_path).read_text(encoding="utf-8")
+    html = (tmp_path / html_path).read_text(encoding="utf-8")
+
+    assert "## LLM-assisted EDA hypotheses" in markdown
+    assert "Label concentration" in markdown
+    assert "LLM-assisted EDA hypotheses" in html
+    assert "check source approval before retrain" in html
+
+
+def test_eda_hypotheses_report_and_context_are_created(tmp_path: Path) -> None:
+    """EDA hypotheses should produce both markdown and machine-readable artifacts."""
+
+    service = ReportingService(_make_context(tmp_path))
+    summary = {
+        "hypothesis_mode": "llm_generate_parse",
+        "requested_provider": "gemini",
+        "resolved_provider": "gemini",
+        "provider_status": "gemini_active_for_eda_hypotheses",
+        "n_hypotheses": 1,
+        "overall_note": "Review the concentration signal before retrain.",
+        "notes": ["Gemini used eda_context.json instead of raw chart images."],
+        "hitl_followups": ["review source approval before retrain"],
+        "hypotheses": [
+            {
+                "title": "Label concentration",
+                "observation": "energy dominates the cleaned set",
+                "hypothesis": "source mix is narrow",
+                "hitl_action": "review source approval before retrain",
+                "priority": "high",
+            }
+        ],
+    }
+
+    report_path = service.write_eda_hypotheses_report(summary)
+    context_path = service.write_eda_hypotheses_context(summary)
+
+    report = (tmp_path / report_path).read_text(encoding="utf-8")
+    context = json.loads((tmp_path / context_path).read_text(encoding="utf-8"))
+
+    assert "EDA Hypotheses Report" in report
+    assert "requested_provider: gemini" in report
+    assert "## Suggested HITL follow-ups" in report
+    assert "Label concentration" in report
+    assert context["provider_status"] == "gemini_active_for_eda_hypotheses"
+
+
 def test_online_governance_report_and_context_are_created(tmp_path: Path) -> None:
     """The governance layer should produce both human-facing and machine-readable artifacts."""
 
@@ -544,6 +628,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     service.registry.save_markdown("reports/review_agreement_report.md", "# Agreement\n")
     service.registry.save_markdown("reports/training_comparison_report.md", "# Training Comparison\n")
     service.registry.save_markdown("reports/al_comparison_report.md", "# Active Learning Comparison\n")
+    service.registry.save_markdown("reports/eda_hypotheses_report.md", "# EDA Hypotheses Report\n")
     service.registry.save_text("reports/review_workspace.html", "<html><body>Review Workspace</body></html>")
     service.registry.save_text("reports/eda_report.html", "<html><body>EDA</body></html>")
     service.registry.save_markdown("reports/review_queue_report.md", "# Review Queue\n")
@@ -580,6 +665,27 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
                 "fallback_reason_counts": {},
             },
             "n_fallback_rows": 0,
+        },
+    )
+    service.registry.save_json(
+        "data/interim/eda_hypotheses_context.json",
+        {
+            "hypothesis_mode": "provider_not_supported_heuristic_fallback",
+            "requested_provider": "mock",
+            "resolved_provider": "mock",
+            "provider_status": "mock_not_supported_for_eda_hypotheses",
+            "n_hypotheses": 1,
+            "overall_note": "Use EDA suggestions as reviewer prompts only.",
+            "hitl_followups": ["check source approval before retrain"],
+            "hypotheses": [
+                {
+                    "title": "Label concentration",
+                    "observation": "energy dominates the cleaned set",
+                    "hypothesis": "source mix is narrow",
+                    "hitl_action": "check source approval before retrain",
+                    "priority": "medium",
+                }
+            ],
         },
     )
     service.registry.save_json("data/interim/model_metrics.json", {"accuracy": 1.0, "f1": 1.0})
@@ -621,6 +727,17 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
             "eda_report_path": "reports/eda_report.md",
             "eda_html_report_path": "reports/eda_report.html",
             "eda_context_path": "data/interim/eda_context.json",
+        },
+        "eda_hypotheses": {
+            "hypotheses_report_path": "reports/eda_hypotheses_report.md",
+            "hypotheses_context_path": "data/interim/eda_hypotheses_context.json",
+            "hypothesis_mode": "provider_not_supported_heuristic_fallback",
+            "requested_provider": "mock",
+            "resolved_provider": "mock",
+            "provider_status": "mock_not_supported_for_eda_hypotheses",
+            "n_hypotheses": 1,
+            "overall_note": "Use EDA suggestions as reviewer prompts only.",
+            "hitl_followups": ["check source approval before retrain"],
         },
         "annotation": {
             "annotation_report_path": "reports/annotation_report.md",
@@ -727,10 +844,13 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     assert 'href="online_governance_report.md"' in html
     assert "../data/interim/model_artifact.pkl" in html
     assert "Cleaned word cloud" in html
+    assert "EDA hypotheses center" in html
     assert "HITL control center" in html
     assert "LLM annotation center" in html
     assert "Settings and gate status" in html
     assert "offline_mock_llm_active" in html
+    assert "Open EDA hypotheses" in html
+    assert "Label concentration" in html
     assert "Open annotation trace" in html
     assert "Text rows with tokens: 2. Tokens after cleaning: 5. Unique terms: 4." in html
     assert "energy" in html

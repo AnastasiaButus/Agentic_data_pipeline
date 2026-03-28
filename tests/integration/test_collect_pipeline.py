@@ -31,6 +31,35 @@ class StubHFLoader:
         return _Frame(dataset)
 
 
+class StubAPIClient:
+    """Return deterministic JSON payloads for api collection integration coverage."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def fetch_json(
+        self,
+        endpoint: str,
+        *,
+        params: object | None = None,
+        headers: object | None = None,
+        timeout: object | None = None,
+    ) -> object:
+        self.calls.append(
+            {
+                "endpoint": endpoint,
+                "params": params,
+                "headers": headers,
+                "timeout": timeout,
+            }
+        )
+        return {
+            "items": [
+                {"review_text": "Balanced energy support", "score": 4, "product_name": "Focus Blend"},
+            ]
+        }
+
+
 class _Frame:
     """Tiny dataframe-like helper used by the integration test."""
 
@@ -94,3 +123,45 @@ def test_collect_pipeline_hf_and_scrape_sources_return_canonical_schema(tmp_path
     assert [row["source"] for row in rows] == ["HF", "Web", "Web"]
     assert [row["text"] for row in rows] == ["Great product", "Great product", "Too sweet"]
     assert agent.registry.saved_paths == ["data/raw/merged_raw.parquet"]
+
+
+def test_collect_pipeline_api_source_returns_canonical_schema(tmp_path: Path) -> None:
+    """API sources should participate in collection and produce canonical text rows."""
+
+    api_client = StubAPIClient()
+    agent = DataCollectionAgent(
+        _make_context(tmp_path),
+        hf_loader=StubHFLoader(),
+        api_client=api_client,
+        registry=StubRegistry(),
+    )
+
+    result = agent.run(
+        [
+            SourceCandidate(
+                "api-1",
+                "api",
+                "Review API",
+                "https://example.com/api/reviews",
+                metadata={
+                    "params": {"topic": "fitness supplements"},
+                    "field_map": {"text": "review_text", "rating": "score"},
+                },
+            )
+        ]
+    )
+
+    rows = result.to_dict(orient="records")
+
+    assert len(rows) == 1
+    assert rows[0]["source"] == "Review API"
+    assert rows[0]["text"] == "Balanced energy support"
+    assert rows[0]["rating"] == 4
+    assert api_client.calls == [
+        {
+            "endpoint": "https://example.com/api/reviews",
+            "params": {"topic": "fitness supplements"},
+            "headers": None,
+            "timeout": None,
+        }
+    ]

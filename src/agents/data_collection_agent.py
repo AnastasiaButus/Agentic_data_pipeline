@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from src.agents.base_agent import BaseAgent
 from src.core.constants import STANDARD_COLUMNS
 from src.domain import SourceCandidate
+from src.providers.apis.json_api_client import JsonAPIClient
 from src.providers.datasets.hf_loader import HFDatasetLoader
 from src.providers.web.scraper import parse_review_blocks
 from src.services.artifact_registry import ArtifactRegistry
@@ -24,6 +26,7 @@ class DataCollectionAgent(BaseAgent):
         self,
         ctx: Any,
         hf_loader: HFDatasetLoader | None = None,
+        api_client: Any | None = None,
         normalizer: SchemaNormalizationService | None = None,
         scraper: Any | None = None,
         registry: ArtifactRegistry | None = None,
@@ -32,6 +35,7 @@ class DataCollectionAgent(BaseAgent):
 
         super().__init__(ctx, registry if registry is not None else ArtifactRegistry(ctx))
         self.hf_loader = hf_loader if hf_loader is not None else HFDatasetLoader()
+        self.api_client = api_client if api_client is not None else JsonAPIClient()
         self.normalizer = normalizer if normalizer is not None else SchemaNormalizationService()
         self.scraper = scraper if scraper is not None else parse_review_blocks
 
@@ -88,6 +92,55 @@ class DataCollectionAgent(BaseAgent):
 
         return self._build_frame(records)
 
+    def fetch_api(
+        self,
+        endpoint: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
+        method: str = "GET",
+        json_payload: Any | None = None,
+        data_payload: Any | None = None,
+        timeout: float | None = None,
+        records_path: str = "",
+        field_map: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Fetch tabular rows from a JSON API and return a dataframe-like object."""
+
+        cleaned_endpoint = str(endpoint or "").strip()
+        if not cleaned_endpoint:
+            return self._empty_frame()
+
+        try:
+            cleaned_method = str(method or "GET").strip().upper() or "GET"
+            if cleaned_method == "GET":
+                payload = self.api_client.fetch_json(
+                    cleaned_endpoint,
+                    params=params,
+                    headers=headers,
+                    timeout=timeout,
+                )
+            else:
+                response = self.api_client.request(
+                    cleaned_method,
+                    cleaned_endpoint,
+                    params=params,
+                    headers=headers,
+                    json=json_payload,
+                    data=data_payload,
+                    timeout=timeout,
+                )
+                payload = response.json() if hasattr(response, "json") else response
+        except Exception:
+            self.logger.warning("Skipping api source during collect stage: %s", cleaned_endpoint)
+            return self._empty_frame()
+
+        records = self._extract_api_records(payload, records_path=records_path)
+        mapped_records = self._apply_api_field_map(records, field_map=field_map)
+        if not mapped_records:
+            return self._empty_frame()
+        return self._build_frame(mapped_records)
+
     def _collect_source(self, source: SourceCandidate) -> Any:
         """Collect one source using the appropriate local provider stub or loader."""
 
@@ -110,11 +163,105 @@ class DataCollectionAgent(BaseAgent):
             return self._empty_frame()
 
         if source.source_type == "api":
-            self.logger.warning("Skipping api source during collect stage: %s", source.uri)
-            return self._empty_frame()
+            metadata = source.metadata if isinstance(source.metadata, dict) else {}
+            return self.fetch_api(
+                str(metadata.get("endpoint") or source.uri),
+                params=self._metadata_mapping(metadata.get("params")),
+                headers=self._metadata_string_mapping(metadata.get("headers")),
+                method=str(metadata.get("method") or "GET"),
+                json_payload=metadata.get("json"),
+                data_payload=metadata.get("data"),
+                timeout=self._metadata_timeout(metadata.get("timeout")),
+                records_path=str(metadata.get("records_path") or ""),
+                field_map=self._metadata_mapping(metadata.get("field_map")),
+            )
 
         self.logger.warning("Skipping unsupported source_type=%s", source.source_type)
         return self._empty_frame()
+
+    def _extract_api_records(self, payload: Any, *, records_path: str = "") -> list[dict[str, Any]]:
+        """Extract a list of row dictionaries from a JSON payload."""
+
+        target = self._resolve_json_path(payload, records_path) if records_path else payload
+        if isinstance(target, list):
+            return [dict(row) for row in target if isinstance(row, dict)]
+
+        if isinstance(target, dict):
+            for key in ("items", "results", "records", "reviews", "data"):
+                nested = target.get(key)
+                if isinstance(nested, list):
+                    return [dict(row) for row in nested if isinstance(row, dict)]
+            return [dict(target)]
+
+        return []
+
+    def _apply_api_field_map(
+        self,
+        records: list[dict[str, Any]],
+        *,
+        field_map: Mapping[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Overlay canonical keys onto raw API rows using a simple source-field map."""
+
+        mapping = dict(field_map or {})
+        if not mapping:
+            return [dict(row) for row in records]
+
+        output_rows: list[dict[str, Any]] = []
+        for row in records:
+            mapped_row = dict(row)
+            for target_field, source_field in mapping.items():
+                resolved_value = self._resolve_json_path(row, str(source_field or ""))
+                if resolved_value is not None:
+                    mapped_row[str(target_field)] = resolved_value
+            output_rows.append(mapped_row)
+        return output_rows
+
+    def _resolve_json_path(self, payload: Any, path: str) -> Any:
+        """Resolve a dotted path inside nested dict/list API payloads."""
+
+        cleaned_path = str(path or "").strip()
+        if not cleaned_path:
+            return payload
+
+        current = payload
+        for part in cleaned_path.split("."):
+            key = part.strip()
+            if not key:
+                return None
+            if isinstance(current, dict):
+                current = current.get(key)
+                continue
+            if isinstance(current, list) and key.isdigit():
+                index = int(key)
+                if index < 0 or index >= len(current):
+                    return None
+                current = current[index]
+                continue
+            return None
+        return current
+
+    def _metadata_mapping(self, value: Any) -> Mapping[str, Any] | None:
+        """Return dict-like metadata only when the value is mapping-shaped."""
+
+        return value if isinstance(value, Mapping) else None
+
+    def _metadata_string_mapping(self, value: Any) -> dict[str, str] | None:
+        """Normalize header-like metadata into string keys and values."""
+
+        if not isinstance(value, Mapping):
+            return None
+        return {str(key): str(item) for key, item in value.items()}
+
+    def _metadata_timeout(self, value: Any) -> float | None:
+        """Coerce timeout metadata into a numeric value when possible."""
+
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _load_html(self, source: SourceCandidate) -> str:
         """Load local HTML from metadata or from a filesystem path in the URI."""

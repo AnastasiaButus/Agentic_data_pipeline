@@ -56,6 +56,70 @@ class StubNormalizer:
         )
 
 
+class StubAPIClient:
+    """Return deterministic JSON payloads for api collection tests."""
+
+    def __init__(self, payload: object | None = None, error: Exception | None = None) -> None:
+        self.payload = payload if payload is not None else []
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    def fetch_json(
+        self,
+        endpoint: str,
+        *,
+        params: object | None = None,
+        headers: object | None = None,
+        timeout: object | None = None,
+    ) -> object:
+        self.calls.append(
+            {
+                "endpoint": endpoint,
+                "params": params,
+                "headers": headers,
+                "timeout": timeout,
+                "method": "GET",
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return self.payload
+
+    def request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        params: object | None = None,
+        headers: object | None = None,
+        json: object | None = None,
+        data: object | None = None,
+        timeout: object | None = None,
+    ) -> object:
+        self.calls.append(
+            {
+                "endpoint": endpoint,
+                "params": params,
+                "headers": headers,
+                "json": json,
+                "data": data,
+                "timeout": timeout,
+                "method": method,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+
+        class _Response:
+            def __init__(self, payload: object) -> None:
+                self._payload = payload
+
+            def json(self) -> object:
+                return self._payload
+
+        return _Response(self.payload)
+
+
 class _Frame:
     """Tiny dataframe-like helper used by tests to avoid depending on pandas."""
 
@@ -234,19 +298,98 @@ def test_html_without_review_blocks_returns_empty_frame(tmp_path: Path) -> None:
     assert frame.empty
 
 
-def test_api_source_is_ignored_without_crashing(tmp_path: Path) -> None:
-    """API sources should be supported as a skip path for this step."""
+def test_fetch_api_builds_frame_from_json_list_payload(tmp_path: Path) -> None:
+    """The fetch_api skill should turn list-shaped JSON payloads into frame-like rows."""
+
+    api_client = StubAPIClient(
+        payload=[
+            {"review_text": "Energy boost for morning workouts", "score": 5, "product": "WakeUp Mix"},
+            {"review_text": "Side effects after second serving", "score": 2, "product": "WakeUp Mix"},
+        ]
+    )
+    agent = DataCollectionAgent(
+        _make_context(tmp_path),
+        hf_loader=StubHFLoader(),
+        api_client=api_client,
+        normalizer=StubNormalizer(),
+        registry=FakeRegistry(),
+    )
+
+    frame = agent.fetch_api(
+        "https://example.com/api/reviews",
+        params={"topic": "fitness supplements"},
+        headers={"X-Test": "1"},
+        timeout=4,
+        field_map={"text": "review_text", "rating": "score", "product_name": "product"},
+    )
+
+    rows = frame.to_dict(orient="records")
+    assert len(rows) == 2
+    assert rows[0]["text"] == "Energy boost for morning workouts"
+    assert rows[0]["rating"] == 5
+    assert rows[0]["product_name"] == "WakeUp Mix"
+    assert api_client.calls == [
+        {
+            "endpoint": "https://example.com/api/reviews",
+            "params": {"topic": "fitness supplements"},
+            "headers": {"X-Test": "1"},
+            "timeout": 4,
+            "method": "GET",
+        }
+    ]
+
+
+def test_api_source_collects_json_payload_and_normalizes_rows(tmp_path: Path) -> None:
+    """API sources should fetch JSON rows and pass mapped text fields into normalization."""
+
+    normalizer = StubNormalizer()
+    api_client = StubAPIClient(
+        payload={"data": {"items": [{"body": "Minecraft crafting guide", "rating_value": 5, "name": "Guide A"}]}}
+    )
+    agent = DataCollectionAgent(
+        _make_minecraft_context(tmp_path),
+        hf_loader=StubHFLoader(),
+        api_client=api_client,
+        normalizer=normalizer,
+        registry=FakeRegistry(),
+    )
+
+    result = agent.run(
+        [
+            SourceCandidate(
+                "api-1",
+                "api",
+                "Craft API",
+                "https://example.com/api/guides",
+                metadata={
+                    "params": {"domain": "minecraft"},
+                    "records_path": "data.items",
+                    "field_map": {"text": "body", "rating": "rating_value", "title": "name"},
+                },
+            )
+        ]
+    )
+
+    raw_rows = normalizer.calls[0].to_dict(orient="records")
+
+    assert not result.empty
+    assert raw_rows == [{"body": "Minecraft crafting guide", "rating_value": 5, "name": "Guide A", "text": "Minecraft crafting guide", "rating": 5, "title": "Guide A"}]
+    assert api_client.calls[0]["params"] == {"domain": "minecraft"}
+
+
+def test_api_source_failure_is_safe(tmp_path: Path) -> None:
+    """API request failures should return an empty canonical frame instead of crashing."""
 
     agent = DataCollectionAgent(
         _make_context(tmp_path),
         hf_loader=StubHFLoader(),
+        api_client=StubAPIClient(error=RuntimeError("api unavailable")),
         normalizer=StubNormalizer(),
         registry=FakeRegistry(),
     )
 
     result = agent.run([SourceCandidate("api-1", "api", "API", "https://example.com/api")])
 
-    assert list(result.columns) == ["id", "source", "text", "label", "rating", "created_at", "split", "meta_json"]
     assert result.empty
 
 

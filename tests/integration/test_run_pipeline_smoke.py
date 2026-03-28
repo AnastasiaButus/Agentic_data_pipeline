@@ -63,6 +63,9 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "annotation_trace_report_path" in final_report
     assert "annotation_trace_context_path" in final_report
     assert "approval_status: skipped_missing_file" in final_report
+    assert "## Settings" in final_report
+    assert "settings_workspace_path: reports/runtime_settings.html" in final_report
+    assert "approval_gate_status: open_without_gate" in final_report
     assert "source_approval_workspace_path: reports/source_approval_workspace.html" in final_report
     assert "governance_report_path: reports/online_governance_report.md" in final_report
     assert "github_auth_mode: not_used" in final_report
@@ -149,6 +152,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "quality_warnings" in eda_context
     source_report = (tmp_path / "reports" / "source_report.md").read_text(encoding="utf-8")
     source_approval_workspace = (tmp_path / "reports" / "source_approval_workspace.html").read_text(encoding="utf-8")
+    runtime_settings_workspace = (tmp_path / "reports" / "runtime_settings.html").read_text(encoding="utf-8")
     assert "Короткий shortlist источников" in source_report
     assert "ручного просмотра и одобрения" in source_report
     assert "Fitness Supplements Offline Demo" in source_report
@@ -158,6 +162,9 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "Source Approval Workspace" in source_approval_workspace
     assert "Download approved_sources.json" in source_approval_workspace
     assert "demo_fitness_scrape" in source_approval_workspace
+    assert "Runtime Settings Workspace" in runtime_settings_workspace
+    assert "GEMINI_API_KEY" in runtime_settings_workspace
+    assert "open_without_gate" in runtime_settings_workspace
     governance_report = (tmp_path / "reports" / "online_governance_report.md").read_text(encoding="utf-8")
     governance_context = json.loads((tmp_path / "data" / "raw" / "online_governance_summary.json").read_text(encoding="utf-8"))
     assert "Online governance and fallback" in governance_report
@@ -173,10 +180,12 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "al_comparison_report.md" in dashboard_html
     assert "review_workspace.html" in dashboard_html
     assert "source_approval_workspace.html" in dashboard_html
+    assert "runtime_settings.html" in dashboard_html
     assert "online_governance_report.md" in dashboard_html
     assert "Cleaned word cloud" in dashboard_html
     assert "HITL control center" in dashboard_html
     assert "LLM annotation center" in dashboard_html
+    assert "Settings and gate status" in dashboard_html
     assert "offline_mock_llm_active" in dashboard_html
     assert "review_queue_report.md" in dashboard_html
     assert "review_queue_corrected.csv" in dashboard_html
@@ -763,10 +772,12 @@ def test_run_pipeline_smoke_uses_only_approved_sources_when_approval_file_exists
     assert exit_code == 0
     assert [source.source_id for source in captured_sources["sources"]] == [approved_source_id]
     assert captured_report["summary"]["approval"]["approval_status"] == "applied"
+    assert captured_report["summary"]["approval"]["approval_gate_status"] == "restricted_to_approved_subset"
     assert (tmp_path / "final_report.md").exists()
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
     assert "## Approval" in final_report
     assert "approval_status: applied" in final_report
+    assert "approval_gate_status: restricted_to_approved_subset" in final_report
     approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
     assert isinstance(approval_candidates, list)
     assert [row["source_id"] for row in approval_candidates] == [approved_source_id, "hf-unapproved"]
@@ -882,8 +893,10 @@ def test_run_pipeline_smoke_reports_applied_empty_subset(monkeypatch, tmp_path: 
     assert exit_code == 0
     assert captured_report["summary"]["approval"]
     assert captured_report["summary"]["approval"]["approval_status"] == "applied_empty_subset"
+    assert captured_report["summary"]["approval"]["approval_gate_status"] == "restricted_empty_subset"
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
     assert "approval_status: applied_empty_subset" in final_report
+    assert "approval_gate_status: restricted_empty_subset" in final_report
     assert (tmp_path / "reports" / "review_merge_report.md").exists()
 
 
@@ -989,10 +1002,12 @@ def test_approval_flow_passes_empty_sources_when_no_match_and_reports_applied_em
     assert [source.source_id for source in captured_sources["sources"]] == []
     # Verify approval_status is applied_empty_subset
     assert captured_report["summary"]["approval"]["approval_status"] == "applied_empty_subset"
+    assert captured_report["summary"]["approval"]["approval_gate_status"] == "restricted_empty_subset"
     assert captured_report["summary"]["approval"]["n_approved_sources"] == 0
     # Verify final report reflects the honest status
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
     assert "approval_status: applied_empty_subset" in final_report
+    assert "approval_gate_status: restricted_empty_subset" in final_report
     assert "## Approval" in final_report
 
 

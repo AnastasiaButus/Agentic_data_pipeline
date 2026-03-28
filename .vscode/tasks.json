@@ -124,6 +124,20 @@
       "problemMatcher": []
     },
     {
+      "label": "open runtime settings",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Start-Process .\\reports\\runtime_settings.html"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "open source approval workspace",
       "type": "shell",
       "command": "powershell",
@@ -153,3 +167,4 @@
     }
   ]
 }
+

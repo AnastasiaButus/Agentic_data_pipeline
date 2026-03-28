@@ -39,6 +39,7 @@ def test_main_prints_operator_facing_paths(monkeypatch, tmp_path: Path, capsys) 
                     "eda_html_report": "reports/eda_report.html",
                     "review_workspace": "reports/review_workspace.html",
                     "source_approval_workspace": "reports/source_approval_workspace.html",
+                    "runtime_settings": "reports/runtime_settings.html",
                 },
                 "review_status": "skipped_missing_corrected_queue",
                 "runtime_mode": "offline_demo",
@@ -63,6 +64,8 @@ def test_main_prints_operator_facing_paths(monkeypatch, tmp_path: Path, capsys) 
     assert (tmp_path / "reports" / "review_workspace.html").resolve().as_uri() in captured.out
     assert str((tmp_path / "reports" / "source_approval_workspace.html").resolve()) in captured.out
     assert (tmp_path / "reports" / "source_approval_workspace.html").resolve().as_uri() in captured.out
+    assert str((tmp_path / "reports" / "runtime_settings.html").resolve()) in captured.out
+    assert (tmp_path / "reports" / "runtime_settings.html").resolve().as_uri() in captured.out
     assert "fill review_queue_corrected.csv and rerun the pipeline" in captured.out
 
 
@@ -78,6 +81,7 @@ def test_main_opens_requested_artifacts(monkeypatch, tmp_path: Path) -> None:
     (reports_dir / "run_dashboard.html").write_text("<html>dashboard</html>", encoding="utf-8")
     (reports_dir / "review_workspace.html").write_text("<html>review</html>", encoding="utf-8")
     (reports_dir / "source_approval_workspace.html").write_text("<html>approval</html>", encoding="utf-8")
+    (reports_dir / "runtime_settings.html").write_text("<html>settings</html>", encoding="utf-8")
 
     class FakePipelineContext:
         @classmethod
@@ -95,6 +99,7 @@ def test_main_opens_requested_artifacts(monkeypatch, tmp_path: Path) -> None:
                     "dashboard": "reports/run_dashboard.html",
                     "review_workspace": "reports/review_workspace.html",
                     "source_approval_workspace": "reports/source_approval_workspace.html",
+                    "runtime_settings": "reports/runtime_settings.html",
                 },
                 "review_status": "merged",
                 "runtime_mode": "offline_demo",
@@ -112,6 +117,7 @@ def test_main_opens_requested_artifacts(monkeypatch, tmp_path: Path) -> None:
             "--open-dashboard",
             "--open-review-workspace",
             "--open-source-approval-workspace",
+            "--open-runtime-settings",
         ]
     )
 
@@ -119,6 +125,7 @@ def test_main_opens_requested_artifacts(monkeypatch, tmp_path: Path) -> None:
     assert (reports_dir / "run_dashboard.html").resolve().as_uri() in opened_urls
     assert (reports_dir / "review_workspace.html").resolve().as_uri() in opened_urls
     assert (reports_dir / "source_approval_workspace.html").resolve().as_uri() in opened_urls
+    assert (reports_dir / "runtime_settings.html").resolve().as_uri() in opened_urls
 
 
 def test_main_auto_opens_dashboard_by_default_outside_pytest(monkeypatch, tmp_path: Path) -> None:

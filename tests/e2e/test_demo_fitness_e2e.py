@@ -64,6 +64,9 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert "annotation_trace_report_path" in final_report
     assert "annotation_trace_context_path" in final_report
     assert "approval_status: skipped_missing_file" in final_report
+    assert "## Settings" in final_report
+    assert "settings_workspace_path: reports/runtime_settings.html" in final_report
+    assert "approval_gate_status: open_without_gate" in final_report
     assert "source_approval_workspace_path: reports/source_approval_workspace.html" in final_report
     assert "governance_report_path: reports/online_governance_report.md" in final_report
     assert "review_workspace_path: reports/review_workspace.html" in final_report
@@ -125,6 +128,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert merge_context["n_effect_label_changes"] == 0
     source_report = (tmp_path / "reports" / "source_report.md").read_text(encoding="utf-8")
     source_approval_workspace = (tmp_path / "reports" / "source_approval_workspace.html").read_text(encoding="utf-8")
+    runtime_settings_workspace = (tmp_path / "reports" / "runtime_settings.html").read_text(encoding="utf-8")
     assert "Короткий shortlist источников" in source_report
     assert "ручного просмотра и одобрения" in source_report
     assert "Fitness Supplements Offline Demo" in source_report
@@ -133,6 +137,9 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert "Source Approval Workspace" in source_approval_workspace
     assert "Download approved_sources.json" in source_approval_workspace
     assert "demo_fitness_scrape" in source_approval_workspace
+    assert "Runtime Settings Workspace" in runtime_settings_workspace
+    assert "GEMINI_API_KEY" in runtime_settings_workspace
+    assert "open_without_gate" in runtime_settings_workspace
     governance_report = (tmp_path / "reports" / "online_governance_report.md").read_text(encoding="utf-8")
     assert "Online governance and fallback" in governance_report
     assert "configured_but_inactive_for_runtime" in governance_report
@@ -144,10 +151,12 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert "al_comparison_report.md" in dashboard_html
     assert "review_workspace.html" in dashboard_html
     assert "source_approval_workspace.html" in dashboard_html
+    assert "runtime_settings.html" in dashboard_html
     assert "online_governance_report.md" in dashboard_html
     assert "Cleaned word cloud" in dashboard_html
     assert "HITL control center" in dashboard_html
     assert "LLM annotation center" in dashboard_html
+    assert "Settings and gate status" in dashboard_html
     assert "offline_mock_llm_active" in dashboard_html
     assert "review_queue_corrected.csv" in dashboard_html
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
@@ -161,6 +170,8 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert captured_report["summary"]["dashboard"]["dashboard_path"] == "reports/run_dashboard.html"
     assert captured_report["summary"]["dashboard"]["final_report_path"] == "final_report.md"
     assert captured_report["summary"]["approval"]["approval_status"] == "skipped_missing_file"
+    assert captured_report["summary"]["settings"]["settings_workspace_path"] == "reports/runtime_settings.html"
+    assert captured_report["summary"]["approval"]["approval_gate_status"] == "open_without_gate"
     assert captured_report["summary"]["approval"]["source_approval_workspace_path"] == "reports/source_approval_workspace.html"
     assert captured_report["summary"]["active_learning"]["al_comparison_report_path"] == "reports/al_comparison_report.md"
     assert captured_report["summary"]["training_comparison"]["comparison_report_path"] == "reports/training_comparison_report.md"

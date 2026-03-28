@@ -350,6 +350,72 @@ def test_source_approval_workspace_is_created_and_exports_approved_ids(tmp_path:
     assert "downloadApprovedSources" in html
 
 
+def test_runtime_settings_workspace_surfaces_key_status_and_gate_semantics(tmp_path: Path) -> None:
+    """The runtime settings workspace should expose env/key status and approval gate semantics in one HTML page."""
+
+    service = ReportingService(_make_context(tmp_path))
+    summary = {
+        "runtime": {
+            "requested_mode": "hybrid",
+            "effective_mode": "hybrid",
+        },
+        "dashboard": {
+            "dashboard_path": "reports/run_dashboard.html",
+            "final_report_path": "final_report.md",
+        },
+        "annotation": {
+            "provider_status": "gemini_requested_but_mock_fallback_active",
+        },
+        "review": {
+            "review_workspace_path": "reports/review_workspace.html",
+        },
+        "approval": {
+            "approval_status": "skipped_missing_file",
+            "approval_gate_status": "open_without_gate",
+            "effective_collection_scope": "all_discovered_sources",
+            "effective_source_count": 3,
+            "gate_note": "approved_sources.json was missing, so this run used the full discovered shortlist.",
+            "source_approval_workspace_path": "reports/source_approval_workspace.html",
+        },
+        "settings": {
+            "settings_workspace_path": "reports/runtime_settings.html",
+            "launcher_path": "ui/project_launcher.html",
+            "dashboard_path": "reports/run_dashboard.html",
+            "final_report_path": "final_report.md",
+            "review_workspace_path": "reports/review_workspace.html",
+            "source_approval_workspace_path": "reports/source_approval_workspace.html",
+            "requested_runtime_mode": "hybrid",
+            "effective_runtime_mode": "hybrid",
+            "requested_provider": "gemini",
+            "resolved_provider": "mock",
+            "provider_status": "gemini_requested_but_mock_fallback_active",
+            "gemini_api_key_present": False,
+            "gemini_api_key_status": "missing_mock_fallback_active",
+            "gemini_note": "GEMINI_API_KEY is missing, so the run fell back to the offline-safe mock annotation path.",
+            "github_search_enabled": True,
+            "github_token_present": False,
+            "github_token_status": "missing_unauthenticated_mode",
+            "github_auth_mode": "unauthenticated",
+            "github_note": "GitHub repository search can still run without GITHUB_TOKEN, but the unauthenticated path is more fragile under rate limits.",
+            "approval_gate_status": "open_without_gate",
+            "effective_collection_scope": "all_discovered_sources",
+            "effective_source_count": 3,
+            "gate_note": "approved_sources.json was missing, so this run used the full discovered shortlist.",
+        },
+    }
+
+    workspace_path = service.write_runtime_settings_workspace(summary)
+    html = (tmp_path / workspace_path).read_text(encoding="utf-8")
+
+    assert "Runtime Settings Workspace" in html
+    assert "GEMINI_API_KEY" in html
+    assert "GITHUB_TOKEN" in html
+    assert "missing_mock_fallback_active" in html
+    assert "open_without_gate" in html
+    assert "all_discovered_sources" in html
+    assert "runtime_settings.html" in html
+
+
 def test_review_queue_report_and_context_make_hitl_steps_explicit(tmp_path: Path) -> None:
     """The review queue artifacts should tell the reviewer what to do next."""
 
@@ -467,6 +533,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     service.registry.save_markdown("final_report.md", "# Final Report\n")
     service.registry.save_markdown("reports/source_report.md", "# Source Report\n")
     service.registry.save_text("reports/source_approval_workspace.html", "<html><body>Source Approval</body></html>")
+    service.registry.save_text("reports/runtime_settings.html", "<html><body>Runtime Settings</body></html>")
     service.registry.save_markdown("reports/online_governance_report.md", "# Online Governance\n")
     service.registry.save_markdown("reports/review_agreement_report.md", "# Agreement\n")
     service.registry.save_markdown("reports/training_comparison_report.md", "# Training Comparison\n")
@@ -584,6 +651,31 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
             "kappa": None,
             "kappa_status": "not_available_no_compared_rows",
         },
+        "settings": {
+            "settings_workspace_path": "reports/runtime_settings.html",
+            "launcher_path": "ui/project_launcher.html",
+            "dashboard_path": "reports/run_dashboard.html",
+            "final_report_path": "final_report.md",
+            "review_workspace_path": "reports/review_workspace.html",
+            "source_approval_workspace_path": "reports/source_approval_workspace.html",
+            "requested_runtime_mode": "offline_demo",
+            "effective_runtime_mode": "offline_demo",
+            "requested_provider": "mock",
+            "resolved_provider": "mock",
+            "provider_status": "offline_mock_llm_active",
+            "gemini_api_key_present": False,
+            "gemini_api_key_status": "not_required_for_current_provider",
+            "gemini_note": "The current annotation provider does not require GEMINI_API_KEY.",
+            "github_search_enabled": True,
+            "github_token_present": False,
+            "github_token_status": "missing_unauthenticated_mode",
+            "github_auth_mode": "unauthenticated",
+            "github_note": "GitHub repository search can still run without GITHUB_TOKEN, but the unauthenticated path is more fragile under rate limits.",
+            "approval_gate_status": "open_without_gate",
+            "effective_collection_scope": "all_discovered_sources",
+            "effective_source_count": 1,
+            "gate_note": "approved_sources.json was missing, so this run used the full discovered shortlist and kept source approval optional.",
+        },
         "training_comparison": {
             "comparison_report_path": "reports/training_comparison_report.md",
             "comparison_context_path": "data/interim/training_comparison.json",
@@ -625,11 +717,13 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     assert 'href="al_comparison_report.md"' in html
     assert 'href="review_workspace.html"' in html
     assert 'href="source_approval_workspace.html"' in html
+    assert 'href="runtime_settings.html"' in html
     assert 'href="online_governance_report.md"' in html
     assert "../data/interim/model_artifact.pkl" in html
     assert "Cleaned word cloud" in html
     assert "HITL control center" in html
     assert "LLM annotation center" in html
+    assert "Settings and gate status" in html
     assert "offline_mock_llm_active" in html
     assert "Open annotation trace" in html
     assert "Text rows with tokens: 2. Tokens after cleaning: 5. Unique terms: 4." in html

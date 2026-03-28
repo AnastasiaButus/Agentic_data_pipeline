@@ -224,6 +224,24 @@ class PipelineController:
         final_report_path = "final_report.md"
         review_workspace_path = "reports/review_workspace.html"
         source_approval_workspace_path = "reports/source_approval_workspace.html"
+        runtime_settings_path = "reports/runtime_settings.html"
+        approval_gate_summary = self._build_approval_gate_summary(
+            approval_file_exists=approval_file_exists,
+            approval_status=approval_status,
+            sources=sources,
+            approved_sources=approved_sources,
+        )
+        settings_summary = self._build_runtime_settings_summary(
+            runtime_summary=runtime_summary,
+            annotation_llm_summary=annotation_llm_summary,
+            online_governance_detail=online_governance_detail,
+            approval_gate_summary=approval_gate_summary,
+            dashboard_path=dashboard_path,
+            final_report_path=final_report_path,
+            review_workspace_path=review_workspace_path,
+            source_approval_workspace_path=source_approval_workspace_path,
+            runtime_settings_path=runtime_settings_path,
+        )
 
         final_summary = {
             "runtime": runtime_summary,
@@ -294,11 +312,17 @@ class PipelineController:
                 "kappa": review_agreement_summary.get("kappa"),
                 "kappa_status": review_agreement_summary.get("kappa_status"),
             },
+            "settings": settings_summary,
             "approval": {
                 "approved_sources_path": "data/raw/approved_sources.json",
                 "approval_candidates_path": "data/raw/approval_candidates.json",
                 "n_approved_sources": len(approved_sources),
                 "approval_status": approval_status,
+                "approval_gate_status": approval_gate_summary.get("approval_gate_status"),
+                "approval_gate_active": approval_gate_summary.get("approval_gate_active"),
+                "effective_collection_scope": approval_gate_summary.get("effective_collection_scope"),
+                "effective_source_count": approval_gate_summary.get("effective_source_count"),
+                "gate_note": approval_gate_summary.get("gate_note"),
                 "source_approval_workspace_path": source_approval_workspace_path,
             },
             "active_learning": {
@@ -334,7 +358,12 @@ class PipelineController:
             online_governance_report_path=online_governance_report_path,
             dashboard_path=dashboard_path,
             final_report_path=final_report_path,
+            approval_status=approval_status,
+            approval_gate_status=self._normalize_text(approval_gate_summary.get("approval_gate_status")),
+            effective_collection_scope=self._normalize_text(approval_gate_summary.get("effective_collection_scope")),
+            effective_source_count=approval_gate_summary.get("effective_source_count"),
         )
+        runtime_settings_path = self.reporting_service.write_runtime_settings_workspace(final_summary)
         review_workspace_path = self.reporting_service.write_review_workspace(
             review_queue,
             review_threshold,
@@ -391,6 +420,7 @@ class PipelineController:
                 "annotation_trace_context": annotation_trace_context_path,
                 "review_workspace": review_workspace_path,
                 "source_approval_workspace": source_approval_workspace_path,
+                "runtime_settings": runtime_settings_path,
                 "review_queue_report": review_queue_report_path,
                 "review_queue_context": review_queue_context_path,
                 "review_merge_report": review_merge_report_path,
@@ -526,6 +556,125 @@ class PipelineController:
             "n_fallback_rows": int(annotation_trace.get("n_fallback_rows", 0) or 0),
             "effect_labels": [str(label).strip() for label in effect_labels if str(label).strip()],
             "fallback_reason_counts": {str(key): int(value) for key, value in fallback_reason_counts.items()},
+        }
+
+    def _build_approval_gate_summary(
+        self,
+        *,
+        approval_file_exists: bool,
+        approval_status: str,
+        sources: list[Any],
+        approved_sources: list[Any],
+    ) -> dict[str, Any]:
+        """Summarize whether collection stayed open or was constrained by approved_sources.json."""
+
+        if not approval_file_exists:
+            approval_gate_status = "open_without_gate"
+            effective_collection_scope = "all_discovered_sources"
+            gate_note = (
+                "approved_sources.json was missing, so this run used the full discovered shortlist and kept source approval optional."
+            )
+            effective_source_count = len(sources)
+        elif approved_sources:
+            approval_gate_status = "restricted_to_approved_subset"
+            effective_collection_scope = "approved_subset_only"
+            gate_note = (
+                "approved_sources.json was present, so collection used only the approved subset from the discovery shortlist."
+            )
+            effective_source_count = len(approved_sources)
+        else:
+            approval_gate_status = "restricted_empty_subset"
+            effective_collection_scope = "no_sources_selected"
+            gate_note = (
+                "approved_sources.json was present, but it matched no discovered source_id values, so collection received an explicit empty subset."
+            )
+            effective_source_count = 0
+
+        return {
+            "approval_status": approval_status,
+            "approval_gate_status": approval_gate_status,
+            "approval_gate_active": approval_file_exists,
+            "effective_collection_scope": effective_collection_scope,
+            "effective_source_count": effective_source_count,
+            "gate_note": gate_note,
+        }
+
+    def _build_runtime_settings_summary(
+        self,
+        *,
+        runtime_summary: dict[str, Any],
+        annotation_llm_summary: dict[str, Any],
+        online_governance_detail: dict[str, Any],
+        approval_gate_summary: dict[str, Any],
+        dashboard_path: str,
+        final_report_path: str,
+        review_workspace_path: str,
+        source_approval_workspace_path: str,
+        runtime_settings_path: str,
+    ) -> dict[str, Any]:
+        """Summarize env-backed settings, provider resolution, and approval gate semantics."""
+
+        gemini_api_key_present = bool(os.getenv("GEMINI_API_KEY", "").strip())
+        github_token_present = bool(os.getenv("GITHUB_TOKEN", "").strip())
+        use_llm_requested = bool(annotation_llm_summary.get("use_llm_requested"))
+        requested_provider = self._normalize_optional_provider(annotation_llm_summary.get("requested_provider"))
+        resolved_provider = self._normalize_optional_provider(annotation_llm_summary.get("resolved_provider"))
+        provider_status = self._normalize_optional_provider(annotation_llm_summary.get("provider_status"))
+        github_auth_mode = self._normalize_optional_provider(online_governance_detail.get("github_auth_mode"))
+        github_search_enabled = bool(getattr(self.ctx.config.source, "use_github_search", False))
+
+        if not use_llm_requested:
+            gemini_key_status = "not_required_llm_disabled"
+            gemini_note = "LLM assistance is disabled in config, so GEMINI_API_KEY is not required for this run."
+        elif requested_provider != "gemini":
+            gemini_key_status = "not_required_for_current_provider"
+            gemini_note = "The current annotation provider does not require GEMINI_API_KEY."
+        elif gemini_api_key_present and resolved_provider == "gemini":
+            gemini_key_status = "present_and_active"
+            gemini_note = "GEMINI_API_KEY is present and Gemini was used for annotation in this run."
+        elif gemini_api_key_present:
+            gemini_key_status = "present_but_not_used"
+            gemini_note = "GEMINI_API_KEY is present, but the run still resolved to a fallback or non-Gemini path."
+        else:
+            gemini_key_status = "missing_mock_fallback_active"
+            gemini_note = "GEMINI_API_KEY is missing, so the run fell back to the offline-safe mock annotation path."
+
+        if not github_search_enabled:
+            github_token_status = "not_required"
+            github_note = "GitHub discovery is disabled in config, so GITHUB_TOKEN is not required."
+        elif github_token_present:
+            github_token_status = "present"
+            github_note = "GITHUB_TOKEN is present, so GitHub repository search can use the more stable authenticated path."
+        else:
+            github_token_status = "missing_unauthenticated_mode"
+            github_note = "GitHub repository search can still run without GITHUB_TOKEN, but the unauthenticated path is more fragile under rate limits."
+
+        return {
+            "settings_workspace_path": runtime_settings_path,
+            "launcher_path": "ui/project_launcher.html",
+            "dashboard_path": dashboard_path,
+            "final_report_path": final_report_path,
+            "review_workspace_path": review_workspace_path,
+            "source_approval_workspace_path": source_approval_workspace_path,
+            "requested_runtime_mode": self._normalize_text(runtime_summary.get("requested_mode")) or "unknown",
+            "effective_runtime_mode": self._normalize_text(runtime_summary.get("effective_mode")) or "unknown",
+            "use_llm_requested": use_llm_requested,
+            "requested_provider": requested_provider,
+            "resolved_provider": resolved_provider,
+            "provider_status": provider_status,
+            "gemini_api_key_present": gemini_api_key_present,
+            "gemini_api_key_status": gemini_key_status,
+            "gemini_note": gemini_note,
+            "github_search_enabled": github_search_enabled,
+            "github_token_present": github_token_present,
+            "github_token_status": github_token_status,
+            "github_auth_mode": github_auth_mode,
+            "github_note": github_note,
+            "approval_gate_status": self._normalize_text(approval_gate_summary.get("approval_gate_status")) or "unknown",
+            "approval_gate_active": bool(approval_gate_summary.get("approval_gate_active")),
+            "effective_collection_scope": self._normalize_text(approval_gate_summary.get("effective_collection_scope")) or "unknown",
+            "effective_source_count": int(approval_gate_summary.get("effective_source_count", 0) or 0),
+            "gate_note": self._normalize_text(approval_gate_summary.get("gate_note")),
         }
 
     def _resolve_annotation_provider_name(self, llm_client: Any) -> str:

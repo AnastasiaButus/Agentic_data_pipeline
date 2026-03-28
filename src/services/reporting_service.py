@@ -194,6 +194,10 @@ class ReportingService:
         online_governance_report_path: str,
         dashboard_path: str,
         final_report_path: str,
+        approval_status: str = "",
+        approval_gate_status: str = "",
+        effective_collection_scope: str = "",
+        effective_source_count: Any = None,
     ) -> str:
         """Write an interactive HTML workspace for manual source approval."""
 
@@ -237,11 +241,28 @@ class ReportingService:
             {self._normalize_text(row.get("source_type")) for row in rows if self._normalize_text(row.get("source_type"))}
         )
 
+        current_status = self._normalize_text(approval_status)
+        current_gate_status = self._normalize_text(approval_gate_status)
+        current_scope = self._normalize_text(effective_collection_scope)
+        current_effective_source_count = self._format_numeric(effective_source_count if effective_source_count is not None else len(rows))
+
         if not rows:
             status_title = "No source candidates found"
             status_body = (
                 "This run did not produce discovery candidates, so there is nothing to approve yet. "
                 "Check the config, runtime mode, and online governance notes before the next rerun."
+            )
+        elif current_status == "applied":
+            status_title = "Approval gate is currently active"
+            status_body = (
+                "approved_sources.json was present for this run, so collection used only the approved subset. "
+                "Update the selection here if you want the next rerun to use a different approved scope."
+            )
+        elif current_status == "applied_empty_subset":
+            status_title = "Approval gate produced an empty subset"
+            status_body = (
+                "approved_sources.json was present, but it matched no discovered source_id values. "
+                "Update the selection here before the next rerun if you want collection to receive sources again."
             )
         elif existing_approved_ids:
             status_title = "Approval input already exists"
@@ -565,11 +586,18 @@ class ReportingService:
               <div class="metric-label">Remote types</div>
               <div class="metric-value">{self._escape_html(self._format_numeric(len(source_type_tags)))}</div>
             </article>
+            <article class="metric-card">
+              <div class="metric-label">Effective sources</div>
+              <div class="metric-value">{self._escape_html(current_effective_source_count)}</div>
+            </article>
           </div>
         </div>
         <div class="status-card{' ready' if existing_approved_ids else ''}">
           <h2>{self._escape_html(status_title)}</h2>
           <p>{self._escape_html(status_body)}</p>
+          <p><strong>Current approval status:</strong> {self._escape_html(current_status or "unknown")}</p>
+          <p><strong>Gate status:</strong> {self._escape_html(current_gate_status or "unknown")}</p>
+          <p><strong>Effective collection scope:</strong> {self._escape_html(current_scope or "unknown")}</p>
           <p><strong>Primary action:</strong> download `approved_sources.json` if you want the next rerun to use only explicit source approvals.</p>
           <p><strong>Next step:</strong> place the file in the expected path and rerun the pipeline.</p>
         </div>
@@ -764,6 +792,357 @@ class ReportingService:
       setApprovalStatus(`Existing approved_sources.json was detected with ${{initiallyApprovedSourceIds.length}} source_id value(s). Update the selection if needed, then download a refreshed file.`);
     }}
     renderSourceApprovalEditor();
+  </script>
+</body>
+</html>"""
+
+        path = Path(workspace_path)
+        self.registry.save_text(path, html)
+        return str(path)
+
+    def write_runtime_settings_workspace(self, summary: dict[str, Any]) -> str:
+        """Write a run-specific settings workspace covering env keys, providers, and approval semantics."""
+
+        dashboard = summary.get("dashboard", {}) if isinstance(summary.get("dashboard"), dict) else {}
+        review = summary.get("review", {}) if isinstance(summary.get("review"), dict) else {}
+        settings = summary.get("settings", {}) if isinstance(summary.get("settings"), dict) else {}
+        approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
+        annotation = summary.get("annotation", {}) if isinstance(summary.get("annotation"), dict) else {}
+        runtime = summary.get("runtime", {}) if isinstance(summary.get("runtime"), dict) else {}
+        workspace_path = self._normalize_text(settings.get("settings_workspace_path")) or "reports/runtime_settings.html"
+
+        dashboard_path = self._normalize_artifact_reference(settings.get("dashboard_path") or dashboard.get("dashboard_path") or "reports/run_dashboard.html")
+        final_report_path = self._normalize_artifact_reference(settings.get("final_report_path") or dashboard.get("final_report_path") or "final_report.md")
+        review_workspace_path = self._normalize_artifact_reference(settings.get("review_workspace_path") or review.get("review_workspace_path") or "reports/review_workspace.html")
+        source_approval_workspace_path = self._normalize_artifact_reference(settings.get("source_approval_workspace_path") or approval.get("source_approval_workspace_path") or "reports/source_approval_workspace.html")
+        launcher_path = self._normalize_artifact_reference(settings.get("launcher_path") or "ui/project_launcher.html")
+
+        quick_links = [
+            {
+                "label": "Open launcher",
+                "path": launcher_path,
+                "description": "Static pre-run entry point with configs, tasks, and first-run commands.",
+            },
+            {
+                "label": "Open operator dashboard",
+                "path": dashboard_path,
+                "description": "Return to the main run dashboard after checking keys and runtime semantics.",
+            },
+            {
+                "label": "Open source approval workspace",
+                "path": source_approval_workspace_path,
+                "description": "Inspect the current source shortlist and export approved_sources.json for the next rerun.",
+            },
+            {
+                "label": "Open review workspace",
+                "path": review_workspace_path,
+                "description": "Continue the reviewer-facing HITL flow for low-confidence rows.",
+            },
+            {
+                "label": "Open final report",
+                "path": final_report_path,
+                "description": "Inspect the compact markdown summary for the current run.",
+            },
+        ]
+        quick_links_html = "".join(
+            self._render_dashboard_link_tile(workspace_path, item["label"], item["path"], item["description"], expected=False)
+            for item in quick_links
+        )
+
+        gemini_api_key_present = bool(settings.get("gemini_api_key_present"))
+        gemini_api_key_status = self._normalize_text(settings.get("gemini_api_key_status")) or "unknown"
+        gemini_note = self._normalize_text(settings.get("gemini_note"))
+        github_token_present = bool(settings.get("github_token_present"))
+        github_token_status = self._normalize_text(settings.get("github_token_status")) or "unknown"
+        github_note = self._normalize_text(settings.get("github_note"))
+        requested_provider = self._normalize_text(settings.get("requested_provider")) or "disabled"
+        resolved_provider = self._normalize_text(settings.get("resolved_provider")) or "disabled"
+        provider_status = self._normalize_text(settings.get("provider_status")) or self._normalize_text(annotation.get("provider_status")) or "unknown"
+        requested_runtime_mode = self._normalize_text(settings.get("requested_runtime_mode")) or self._normalize_text(runtime.get("requested_mode")) or "unknown"
+        effective_runtime_mode = self._normalize_text(settings.get("effective_runtime_mode")) or self._normalize_text(runtime.get("effective_mode")) or "unknown"
+        github_auth_mode = self._normalize_text(settings.get("github_auth_mode")) or "not_used"
+
+        approval_gate_status = self._normalize_text(settings.get("approval_gate_status") or approval.get("approval_gate_status")) or "unknown"
+        effective_collection_scope = self._normalize_text(settings.get("effective_collection_scope") or approval.get("effective_collection_scope")) or "unknown"
+        effective_source_count = self._format_numeric(settings.get("effective_source_count") if settings.get("effective_source_count") is not None else approval.get("effective_source_count", 0))
+        gate_note = self._normalize_text(settings.get("gate_note") or approval.get("gate_note"))
+        approval_status = self._normalize_text(approval.get("approval_status")) or "unknown"
+
+        command_blocks = [
+            (
+                "Set Gemini key in PowerShell",
+                '$env:GEMINI_API_KEY="paste-your-key-here"',
+            ),
+            (
+                "Set GitHub token in PowerShell",
+                '$env:GITHUB_TOKEN="paste-your-token-here"',
+            ),
+            (
+                "Run the stable offline demo",
+                '.\\.venv\\Scripts\\python.exe run_pipeline.py --config configs\\demo_fitness.yaml',
+            ),
+            (
+                "Open source approval workspace",
+                'start .\\reports\\source_approval_workspace.html',
+            ),
+        ]
+        command_cards_html = "".join(
+            (
+                '<article class="command-card">'
+                f'<h3>{self._escape_html(title)}</h3>'
+                f'<pre id="cmd-{index}">{self._escape_html(command)}</pre>'
+                f'<button class="copy-button" type="button" data-copy-target="cmd-{index}">Copy</button>'
+                "</article>"
+            )
+            for index, (title, command) in enumerate(command_blocks, start=1)
+        )
+
+        html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Runtime Settings Workspace</title>
+  <style>
+    :root {{
+      --bg: #f2ece1;
+      --panel: rgba(255, 250, 243, 0.94);
+      --ink: #1f2a30;
+      --muted: #5d6a72;
+      --accent: #1f6f78;
+      --accent-soft: #d8eeea;
+      --warm: #d97706;
+      --warm-soft: #fde7c7;
+      --line: rgba(31, 42, 48, 0.12);
+      --shadow: 0 20px 46px rgba(31, 42, 48, 0.09);
+      --radius: 22px;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: "Segoe UI Variable Text", "Trebuchet MS", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(31, 111, 120, 0.15), transparent 28%),
+        radial-gradient(circle at top right, rgba(217, 119, 6, 0.16), transparent 24%),
+        linear-gradient(180deg, #f8f3eb 0%, var(--bg) 100%);
+      min-height: 100vh;
+    }}
+    .shell {{ max-width: 1220px; margin: 0 auto; padding: 32px 20px 48px; }}
+    .hero, .panel, .metric-card, .link-tile, .command-card {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }}
+    .hero {{ padding: 28px; }}
+    .eyebrow {{
+      text-transform: uppercase;
+      letter-spacing: 0.10em;
+      font-size: 12px;
+      color: var(--accent);
+      margin-bottom: 10px;
+      font-weight: 700;
+    }}
+    h1 {{ font-size: clamp(2rem, 4vw, 3rem); line-height: 1.03; margin: 0 0 14px; }}
+    .lede {{ max-width: 800px; line-height: 1.65; color: var(--muted); margin: 0; }}
+    .hero-grid, .layout, .metrics, .quick-links, .command-grid {{
+      display: grid;
+      gap: 18px;
+    }}
+    .hero-grid {{ grid-template-columns: 1.6fr 1fr; margin-top: 22px; }}
+    .layout {{ grid-template-columns: 1fr 1fr; margin-top: 20px; }}
+    .metrics {{ grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-top: 24px; }}
+    .metric-card {{ padding: 18px; }}
+    .metric-label {{ font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }}
+    .metric-value {{ margin-top: 10px; font-size: 1.55rem; font-weight: 700; }}
+    .panel {{ padding: 22px; }}
+    .panel h2 {{ margin: 0 0 10px; font-size: 1.15rem; }}
+    .panel p {{ margin: 0; color: var(--muted); line-height: 1.6; }}
+    .stack {{ display: grid; gap: 12px; margin-top: 14px; }}
+    .callout {{
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(216, 238, 234, 0.45);
+      border: 1px solid rgba(31, 111, 120, 0.14);
+      color: var(--ink);
+      line-height: 1.6;
+    }}
+    .callout.warning {{
+      background: rgba(253, 231, 199, 0.72);
+      border-color: rgba(217, 119, 6, 0.18);
+      color: #8c4f00;
+    }}
+    .quick-links {{ grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 16px; }}
+    .link-tile {{
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      padding: 18px;
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }}
+    .link-tile:hover {{ transform: translateY(-2px); box-shadow: 0 18px 34px rgba(31, 42, 48, 0.10); border-color: rgba(31, 111, 120, 0.26); }}
+    .link-tile .title {{ font-size: 1rem; font-weight: 700; }}
+    .link-tile .path {{ margin-top: 8px; font-family: "Cascadia Mono", "Consolas", monospace; font-size: 0.82rem; color: var(--accent); word-break: break-all; }}
+    .link-tile .description {{ margin-top: 8px; color: var(--muted); line-height: 1.5; font-size: 0.92rem; }}
+    .artifact-status {{
+      display: inline-flex;
+      align-items: center;
+      margin-top: 12px;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: #edf7f4;
+      color: var(--accent);
+    }}
+    .artifact-status.expected {{ background: var(--warm-soft); color: #9a5a03; }}
+    .command-grid {{ grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-top: 16px; }}
+    .command-card {{ padding: 18px; }}
+    .command-card h3 {{ margin: 0 0 10px; font-size: 1rem; }}
+    pre {{
+      margin: 0;
+      padding: 14px;
+      border-radius: 18px;
+      overflow-x: auto;
+      background: #1f2a30;
+      color: #f8f6f1;
+      font-family: "Cascadia Mono", "Consolas", monospace;
+      font-size: 0.84rem;
+      line-height: 1.55;
+    }}
+    .copy-button {{
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 9px 14px;
+      background: rgba(255, 255, 255, 0.92);
+      color: var(--ink);
+      font-weight: 700;
+      cursor: pointer;
+    }}
+    @media (max-width: 960px) {{
+      .hero-grid, .layout {{ grid-template-columns: 1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="eyebrow">Runtime Settings Workspace</div>
+      <h1>Credentials, provider status, and approval semantics</h1>
+      <p class="lede">This page explains how the current run resolved its LLM provider, whether environment-backed keys were available, and how source approval affected collection. It is meant to answer the practical operator questions before the next rerun.</p>
+      <p class="lede" style="margin-top: 12px;"><strong>Workspace path:</strong> {self._escape_html(workspace_path)}</p>
+      <div class="metrics">
+        <article class="metric-card">
+          <div class="metric-label">Requested mode</div>
+          <div class="metric-value">{self._escape_html(requested_runtime_mode)}</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Effective mode</div>
+          <div class="metric-value">{self._escape_html(effective_runtime_mode)}</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Resolved provider</div>
+          <div class="metric-value">{self._escape_html(resolved_provider)}</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Approval gate</div>
+          <div class="metric-value">{self._escape_html(approval_gate_status)}</div>
+        </article>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <h2>LLM and Gemini onboarding</h2>
+        <p>LLM assistance is intentionally limited to annotation-sensitive work. Everything else stays deterministic and local, so missing keys do not block the offline baseline.</p>
+        <div class="stack">
+          <p><strong>Requested provider:</strong> {self._escape_html(requested_provider)}</p>
+          <p><strong>Resolved provider:</strong> {self._escape_html(resolved_provider)}</p>
+          <p><strong>Provider status:</strong> {self._escape_html(provider_status)}</p>
+          <p><strong>GEMINI_API_KEY present:</strong> {self._escape_html("yes" if gemini_api_key_present else "no")}</p>
+          <p><strong>GEMINI_API_KEY status:</strong> {self._escape_html(gemini_api_key_status)}</p>
+        </div>
+        <div class="callout{' warning' if 'missing' in gemini_api_key_status else ''}">{self._escape_html(gemini_note)}</div>
+      </div>
+
+      <div class="panel">
+        <h2>GitHub and online discovery onboarding</h2>
+        <p>GitHub lookup remains optional. Without `GITHUB_TOKEN`, the run can still proceed, but repository search becomes more fragile under rate limits.</p>
+        <div class="stack">
+          <p><strong>GitHub auth mode:</strong> {self._escape_html(github_auth_mode)}</p>
+          <p><strong>GitHub search enabled:</strong> {self._escape_html("yes" if settings.get("github_search_enabled") else "no")}</p>
+          <p><strong>GITHUB_TOKEN present:</strong> {self._escape_html("yes" if github_token_present else "no")}</p>
+          <p><strong>GITHUB_TOKEN status:</strong> {self._escape_html(github_token_status)}</p>
+        </div>
+        <div class="callout{' warning' if 'missing' in github_token_status else ''}">{self._escape_html(github_note)}</div>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <h2>Source approval gate semantics</h2>
+        <p>This block makes the collection contract explicit: either the run stayed open and used the full shortlist, or an existing `approved_sources.json` constrained the input set.</p>
+        <div class="stack">
+          <p><strong>Approval status:</strong> {self._escape_html(approval_status)}</p>
+          <p><strong>Approval gate status:</strong> {self._escape_html(approval_gate_status)}</p>
+          <p><strong>Effective collection scope:</strong> {self._escape_html(effective_collection_scope)}</p>
+          <p><strong>Effective source count:</strong> {self._escape_html(effective_source_count)}</p>
+        </div>
+        <div class="callout{' warning' if approval_gate_status == 'restricted_empty_subset' else ''}">{self._escape_html(gate_note)}</div>
+      </div>
+
+      <div class="panel">
+        <h2>Open next</h2>
+        <p>These links connect the static launcher and the run-generated interfaces so the operator can move from setup to approval, review, and reporting without hunting for files.</p>
+        <div class="quick-links">{quick_links_html}</div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top: 20px;">
+      <h2>Copyable commands</h2>
+      <p>Use these PowerShell snippets to set keys for the current shell or to open the next interface directly.</p>
+      <div class="command-grid">{command_cards_html}</div>
+    </section>
+  </div>
+  <script>
+    async function copyText(value) {{
+      if (!value) {{
+        return;
+      }}
+      try {{
+        if (navigator.clipboard && navigator.clipboard.writeText) {{
+          await navigator.clipboard.writeText(value);
+          return;
+        }}
+      }} catch (error) {{
+      }}
+      const area = document.createElement("textarea");
+      area.value = value;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      document.body.removeChild(area);
+    }}
+
+    document.querySelectorAll("[data-copy-target]").forEach((button) => {{
+      button.addEventListener("click", async () => {{
+        const targetId = button.getAttribute("data-copy-target");
+        const target = targetId ? document.getElementById(targetId) : null;
+        if (!target) {{
+          return;
+        }}
+        await copyText(target.textContent || "");
+        button.textContent = "Copied";
+        window.setTimeout(() => {{
+          button.textContent = "Copy";
+        }}, 1400);
+      }});
+    }});
   </script>
 </body>
 </html>"""
@@ -2271,13 +2650,14 @@ class ReportingService:
             "annotation": "Annotation",
             "review": "Review",
             "agreement": "Agreement",
+            "settings": "Settings",
             "approval": "Approval",
             "active_learning": "Active Learning",
             "training_comparison": "Training Comparison",
             "training": "Training",
             "artifacts": "Artifacts",
         }
-        for section_name in ["runtime", "dashboard", "sources", "online_governance", "quality", "eda", "annotation", "review", "agreement", "approval", "active_learning", "training_comparison", "training", "artifacts"]:
+        for section_name in ["runtime", "dashboard", "sources", "online_governance", "quality", "eda", "annotation", "review", "agreement", "settings", "approval", "active_learning", "training_comparison", "training", "artifacts"]:
             section = summary.get(section_name)
             lines.append(f"## {section_titles[section_name]}")
             lines.append("")
@@ -2365,6 +2745,7 @@ class ReportingService:
         annotation = summary.get("annotation", {}) if isinstance(summary.get("annotation"), dict) else {}
         review = summary.get("review", {}) if isinstance(summary.get("review"), dict) else {}
         agreement = summary.get("agreement", {}) if isinstance(summary.get("agreement"), dict) else {}
+        settings = summary.get("settings", {}) if isinstance(summary.get("settings"), dict) else {}
         approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
         active_learning = summary.get("active_learning", {}) if isinstance(summary.get("active_learning"), dict) else {}
         training_comparison = summary.get("training_comparison", {}) if isinstance(summary.get("training_comparison"), dict) else {}
@@ -2463,6 +2844,11 @@ class ReportingService:
                 "description": "Interactive source approval page that exports approved_sources.json for the next rerun.",
             },
             {
+                "label": "Open runtime settings",
+                "path": settings.get("settings_workspace_path"),
+                "description": "Environment key status, provider resolution, and current approval-gate semantics for this run.",
+            },
+            {
                 "label": "Open online governance",
                 "path": online_governance.get("governance_report_path"),
                 "description": "Rate limits, auth mode, provider status and fallback behavior for remote discovery.",
@@ -2507,6 +2893,11 @@ class ReportingService:
             dashboard_path,
             annotation,
             annotation_trace_payload,
+        )
+        settings_panel_html = self._render_dashboard_settings_panel(
+            dashboard_path,
+            settings,
+            approval,
         )
 
         next_step = self._normalize_text(dashboard.get("next_step")) or self._normalize_text(review.get("next_step")) or "inspect artifacts"
@@ -2806,6 +3197,12 @@ class ReportingService:
         <p>Здесь видно, какая annotation path реально работала в текущем запуске: offline mock, Gemini или fallback-режим, плюс сколько строк ушло в low-confidence и fallback.</p>
         {llm_panel_html}
       </div>
+    </section>
+
+    <section class="panel" style="margin-top: 20px;">
+      <h2>Settings and gate status</h2>
+      <p>This compact view explains which env-backed provider path was active and whether collection ran openly or under an explicit approved_sources gate.</p>
+      {settings_panel_html}
     </section>
 
     <section class="panel" style="margin-top: 20px;">
@@ -3296,6 +3693,67 @@ class ReportingService:
             f'<div class="quick-links">{quick_links_html}</div>'
         )
 
+    def _render_dashboard_settings_panel(
+        self,
+        dashboard_path: str,
+        settings: dict[str, Any],
+        approval: dict[str, Any],
+    ) -> str:
+        """Render a compact settings panel with env/key status and approval semantics."""
+
+        resolved_provider = self._normalize_text(settings.get("resolved_provider")) or "disabled"
+        provider_status = self._normalize_text(settings.get("provider_status")) or "unknown"
+        gemini_status = self._normalize_text(settings.get("gemini_api_key_status")) or "unknown"
+        github_status = self._normalize_text(settings.get("github_token_status")) or "unknown"
+        github_auth_mode = self._normalize_text(settings.get("github_auth_mode")) or "not_used"
+        approval_gate_status = self._normalize_text(settings.get("approval_gate_status") or approval.get("approval_gate_status")) or "unknown"
+        effective_scope = self._normalize_text(settings.get("effective_collection_scope") or approval.get("effective_collection_scope")) or "unknown"
+        effective_source_count = self._format_numeric(
+            settings.get("effective_source_count")
+            if settings.get("effective_source_count") is not None
+            else approval.get("effective_source_count", 0)
+        )
+        gate_note = self._normalize_text(settings.get("gate_note") or approval.get("gate_note"))
+
+        if "missing" in gemini_status or "missing" in github_status or approval_gate_status == "restricted_empty_subset":
+            callout_class = "callout warning"
+        else:
+            callout_class = "callout"
+
+        quick_links = [
+            {
+                "label": "Open runtime settings",
+                "path": settings.get("settings_workspace_path"),
+                "description": "Detailed key status, onboarding commands, and gate semantics for this run.",
+            },
+            {
+                "label": "Open source approval workspace",
+                "path": settings.get("source_approval_workspace_path") or approval.get("source_approval_workspace_path"),
+                "description": "Adjust approved_sources.json before the next rerun if you want to change collection scope.",
+            },
+        ]
+        quick_links_html = "".join(
+            self._render_dashboard_link_tile(dashboard_path, item["label"], item["path"], item["description"], expected=False)
+            for item in quick_links
+        )
+
+        return (
+            f'<div class="{self._escape_html(callout_class)}">{self._escape_html(gate_note or "Inspect runtime_settings.html before the next rerun if you need to change provider keys or source gate behavior.")}</div>'
+            '<div class="sub-metric-grid">'
+            f'<div class="sub-metric"><div class="metric-label">Resolved provider</div><div class="metric-value">{self._escape_html(resolved_provider)}</div></div>'
+            f'<div class="sub-metric"><div class="metric-label">Gemini key</div><div class="metric-value">{self._escape_html(gemini_status)}</div></div>'
+            f'<div class="sub-metric"><div class="metric-label">GitHub token</div><div class="metric-value">{self._escape_html(github_status)}</div></div>'
+            f'<div class="sub-metric"><div class="metric-label">Approval gate</div><div class="metric-value">{self._escape_html(approval_gate_status)}</div></div>'
+            "</div>"
+            '<div class="stack">'
+            f'<p><strong>Provider status:</strong> {self._escape_html(provider_status)}</p>'
+            f'<p><strong>GitHub auth mode:</strong> {self._escape_html(github_auth_mode)}</p>'
+            f'<p><strong>Effective collection scope:</strong> {self._escape_html(effective_scope)}</p>'
+            f'<p><strong>Effective source count:</strong> {self._escape_html(effective_source_count)}</p>'
+            "</div>"
+            f'<div class="quick-links">{quick_links_html}</div>'
+        )
+
     def _build_dashboard_artifact_groups(self, summary: dict[str, Any]) -> list[dict[str, Any]]:
         """Group the main run artifacts by the job they play for the operator."""
 
@@ -3306,6 +3764,7 @@ class ReportingService:
         annotation = summary.get("annotation", {}) if isinstance(summary.get("annotation"), dict) else {}
         review = summary.get("review", {}) if isinstance(summary.get("review"), dict) else {}
         agreement = summary.get("agreement", {}) if isinstance(summary.get("agreement"), dict) else {}
+        settings = summary.get("settings", {}) if isinstance(summary.get("settings"), dict) else {}
         approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
         active_learning = summary.get("active_learning", {}) if isinstance(summary.get("active_learning"), dict) else {}
         training_comparison = summary.get("training_comparison", {}) if isinstance(summary.get("training_comparison"), dict) else {}
@@ -3316,6 +3775,7 @@ class ReportingService:
                 "title": "Human-facing reports",
                 "items": [
                     {"label": "Final report", "path": dashboard.get("final_report_path"), "note": "Главный markdown summary по текущему запуску."},
+                    {"label": "Runtime settings workspace", "path": settings.get("settings_workspace_path"), "note": "Env key status, provider resolution, onboarding commands and approval gate semantics."},
                     {"label": "Source shortlist", "path": sources.get("source_report_path"), "note": "Shortlist источников и approval guidance."},
                     {"label": "Source approval workspace", "path": approval.get("source_approval_workspace_path"), "note": "Interactive approval page for selecting allowed sources and exporting approved_sources.json."},
                     {"label": "Online governance report", "path": online_governance.get("governance_report_path"), "note": "Remote provider limits, auth mode, fallback behavior and operator guidance."},

@@ -536,10 +536,11 @@ CLI в этом блоке не меняется: пайплайн по-преж
 - `run demo_minecraft and open dashboard`
 - `open launcher`
 - `open dashboard`
+- `open runtime settings`
 - `open source approval workspace`
 - `open review workspace`
 
-Для первого знакомства с проектом удобно начинать с `open launcher`: это статическая стартовая страница `ui/project_launcher.html`, где собраны demo-конфиги, команды первого запуска, ссылки на dashboard, source approval workspace, review workspace и напоминание про `GEMINI_API_KEY`.
+Для первого знакомства с проектом удобно начинать с `open launcher`: это статическая стартовая страница `ui/project_launcher.html`, где собраны demo-конфиги, команды первого запуска, ссылки на dashboard, `runtime_settings.html`, source approval workspace, review workspace и напоминания про `GEMINI_API_KEY` / `GITHUB_TOKEN`.
 
 Что делать:
 

@@ -60,6 +60,33 @@ class StubAPIClient:
         }
 
 
+class StubWebScraper:
+    """Return deterministic rows for selector-based scrape integration tests."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(
+        self,
+        url: str,
+        selector: str,
+        *,
+        headers: dict[str, str] | None = None,
+        timeout: float | None = None,
+        html: str | None = None,
+    ) -> Any:
+        self.calls.append(
+            {
+                "url": url,
+                "selector": selector,
+                "headers": headers,
+                "timeout": timeout,
+                "html": html,
+            }
+        )
+        return _Frame([{"text": "Selector scrape row", "rating": 3, "title": "Selector Card"}])
+
+
 class _Frame:
     """Tiny dataframe-like helper used by the integration test."""
 
@@ -163,5 +190,45 @@ def test_collect_pipeline_api_source_returns_canonical_schema(tmp_path: Path) ->
             "params": {"topic": "fitness supplements"},
             "headers": None,
             "timeout": None,
+        }
+    ]
+
+
+def test_collect_pipeline_selector_scrape_source_returns_canonical_schema(tmp_path: Path) -> None:
+    """Selector-based scrape sources should flow through the collect stage and normalization."""
+
+    web_scraper = StubWebScraper()
+    agent = DataCollectionAgent(
+        _make_context(tmp_path),
+        hf_loader=StubHFLoader(),
+        web_scraper=web_scraper,
+        registry=StubRegistry(),
+    )
+
+    result = agent.run(
+        [
+            SourceCandidate(
+                "scrape-1",
+                "scrape",
+                "Web Selector",
+                "https://example.com/reviews",
+                metadata={"selector": ".review-card", "headers": {"User-Agent": "test"}, "timeout": 8},
+            )
+        ]
+    )
+
+    rows = result.to_dict(orient="records")
+
+    assert len(rows) == 1
+    assert rows[0]["source"] == "Web Selector"
+    assert rows[0]["text"] == "Selector scrape row"
+    assert rows[0]["rating"] == 3
+    assert web_scraper.calls == [
+        {
+            "url": "https://example.com/reviews",
+            "selector": ".review-card",
+            "headers": {"User-Agent": "test"},
+            "timeout": 8.0,
+            "html": None,
         }
     ]

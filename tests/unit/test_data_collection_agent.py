@@ -120,6 +120,37 @@ class StubAPIClient:
         return _Response(self.payload)
 
 
+class StubWebScraper:
+    """Return deterministic frame-like rows for selector-based scraping tests."""
+
+    def __init__(self, rows: list[dict[str, object]] | None = None, error: Exception | None = None) -> None:
+        self.rows = rows if rows is not None else [{"text": "Default scraped row", "rating": 4}]
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(
+        self,
+        url: str,
+        selector: str,
+        *,
+        headers: dict[str, str] | None = None,
+        timeout: float | None = None,
+        html: str | None = None,
+    ) -> Any:
+        self.calls.append(
+            {
+                "url": url,
+                "selector": selector,
+                "headers": headers,
+                "timeout": timeout,
+                "html": html,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return _Frame(self.rows)
+
+
 class _Frame:
     """Tiny dataframe-like helper used by tests to avoid depending on pandas."""
 
@@ -251,6 +282,78 @@ def test_scrape_source_converts_to_frame_like_object(tmp_path: Path) -> None:
     assert frame.to_dict(orient="records")[0]["text"] == "Great product"
 
 
+def test_scrape_skill_uses_selector_based_web_scraper(tmp_path: Path) -> None:
+    """The public scrape skill should pass URL, selector and HTTP options to the web scraper."""
+
+    web_scraper = StubWebScraper(rows=[{"text": "Selector row", "rating": 3, "title": "Card"}])
+    agent = DataCollectionAgent(
+        _make_context(tmp_path),
+        hf_loader=StubHFLoader(),
+        api_client=StubAPIClient(),
+        web_scraper=web_scraper,
+        normalizer=StubNormalizer(),
+        registry=FakeRegistry(),
+    )
+
+    frame = agent.scrape(
+        "https://example.com/reviews",
+        ".review-card",
+        headers={"User-Agent": "test-agent"},
+        timeout=6,
+    )
+
+    rows = frame.to_dict(orient="records")
+
+    assert rows == [{"text": "Selector row", "rating": 3, "title": "Card"}]
+    assert web_scraper.calls == [
+        {
+            "url": "https://example.com/reviews",
+            "selector": ".review-card",
+            "headers": {"User-Agent": "test-agent"},
+            "timeout": 6,
+            "html": None,
+        }
+    ]
+
+
+def test_scrape_source_with_selector_uses_local_html_without_network(tmp_path: Path) -> None:
+    """Selector-based scrape sources should reuse embedded local HTML when it is already available."""
+
+    normalizer = StubNormalizer()
+    web_scraper = StubWebScraper(rows=[{"text": "Great selector product", "rating": 5, "title": "Selector"}])
+    html = (
+        "<html><body>"
+        '<article class="review-card" data-text="Great selector product" data-rating="5" data-title="Selector">Nice</article>'
+        "</body></html>"
+    )
+    agent = DataCollectionAgent(
+        _make_context(tmp_path),
+        hf_loader=StubHFLoader(),
+        api_client=StubAPIClient(),
+        web_scraper=web_scraper,
+        normalizer=normalizer,
+        registry=FakeRegistry(),
+    )
+
+    result = agent.run(
+        [
+            SourceCandidate(
+                "scrape-1",
+                "scrape",
+                "Selector Web",
+                "https://example.com/reviews",
+                metadata={"selector": ".review-card", "html": html, "timeout": 7},
+            )
+        ]
+    )
+
+    assert not result.empty
+    assert web_scraper.calls[0]["selector"] == ".review-card"
+    assert web_scraper.calls[0]["html"] == html
+    assert web_scraper.calls[0]["timeout"] == 7
+    assert normalizer.calls[0].to_dict(orient="records")[0]["text"] == "Great selector product"
+
+
 def test_empty_sources_return_empty_normalized_frame(tmp_path: Path) -> None:
     """An empty source list should return an empty canonical frame."""
 
@@ -296,6 +399,33 @@ def test_html_without_review_blocks_returns_empty_frame(tmp_path: Path) -> None:
     frame = parse_review_blocks("<html><body><p>No reviews here</p></body></html>")
 
     assert frame.empty
+
+
+def test_scrape_source_failure_is_safe(tmp_path: Path) -> None:
+    """Selector-based scrape failures should fall back to an empty canonical frame."""
+
+    agent = DataCollectionAgent(
+        _make_context(tmp_path),
+        hf_loader=StubHFLoader(),
+        api_client=StubAPIClient(),
+        web_scraper=StubWebScraper(error=RuntimeError("network down")),
+        normalizer=StubNormalizer(),
+        registry=FakeRegistry(),
+    )
+
+    result = agent.run(
+        [
+            SourceCandidate(
+                "scrape-1",
+                "scrape",
+                "Web",
+                "https://example.com/reviews",
+                metadata={"selector": ".review-card"},
+            )
+        ]
+    )
+
+    assert result.empty
 
 
 def test_fetch_api_builds_frame_from_json_list_payload(tmp_path: Path) -> None:

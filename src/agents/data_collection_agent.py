@@ -13,7 +13,7 @@ from src.core.constants import STANDARD_COLUMNS
 from src.domain import SourceCandidate
 from src.providers.apis.json_api_client import JsonAPIClient
 from src.providers.datasets.hf_loader import HFDatasetLoader
-from src.providers.web.scraper import parse_review_blocks
+from src.providers.web.scraper import parse_review_blocks, scrape_url
 from src.services.artifact_registry import ArtifactRegistry
 from src.services.dataset_filter_service import filter_topic_rows
 from src.services.schema_normalization_service import SchemaNormalizationService
@@ -27,6 +27,7 @@ class DataCollectionAgent(BaseAgent):
         ctx: Any,
         hf_loader: HFDatasetLoader | None = None,
         api_client: Any | None = None,
+        web_scraper: Any | None = None,
         normalizer: SchemaNormalizationService | None = None,
         scraper: Any | None = None,
         registry: ArtifactRegistry | None = None,
@@ -36,6 +37,7 @@ class DataCollectionAgent(BaseAgent):
         super().__init__(ctx, registry if registry is not None else ArtifactRegistry(ctx))
         self.hf_loader = hf_loader if hf_loader is not None else HFDatasetLoader()
         self.api_client = api_client if api_client is not None else JsonAPIClient()
+        self.web_scraper = web_scraper if web_scraper is not None else scrape_url
         self.normalizer = normalizer if normalizer is not None else SchemaNormalizationService()
         self.scraper = scraper if scraper is not None else parse_review_blocks
 
@@ -141,6 +143,28 @@ class DataCollectionAgent(BaseAgent):
             return self._empty_frame()
         return self._build_frame(mapped_records)
 
+    def scrape(
+        self,
+        url: str,
+        selector: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        html: str | None = None,
+    ) -> Any:
+        """Fetch or parse HTML rows from a page using a CSS selector."""
+
+        cleaned_selector = str(selector or "").strip()
+        if not cleaned_selector:
+            return self._empty_frame()
+        return self.web_scraper(
+            str(url or "").strip(),
+            cleaned_selector,
+            headers=dict(headers or {}),
+            timeout=timeout,
+            html=html,
+        )
+
     def _collect_source(self, source: SourceCandidate) -> Any:
         """Collect one source using the appropriate local provider stub or loader."""
 
@@ -154,9 +178,26 @@ class DataCollectionAgent(BaseAgent):
 
         if source.source_type == "scrape":
             html = self._load_html(source)
-            if not html:
+            metadata = source.metadata if isinstance(source.metadata, dict) else {}
+            selector = str(metadata.get("selector") or "").strip()
+            headers = self._metadata_string_mapping(metadata.get("headers"))
+            timeout = self._metadata_timeout(metadata.get("timeout"))
+            try:
+                if selector:
+                    return self.scrape(
+                        str(metadata.get("url") or source.uri),
+                        selector,
+                        headers=headers,
+                        timeout=timeout,
+                        html=html or None,
+                    )
+                if html:
+                    return self.scraper(html)
+            except Exception:
+                self.logger.warning("Skipping scrape source during collect stage: %s", source.uri)
                 return self._empty_frame()
-            return self.scraper(html)
+            self.logger.warning("Skipping scrape source without selector or local HTML: %s", source.uri)
+            return self._empty_frame()
 
         if source.source_type == "github_repo":
             self.logger.warning("Skipping github_repo source during collect stage: %s", source.uri)

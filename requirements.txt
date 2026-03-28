@@ -4,4 +4,5 @@ scikit-learn==1.8.0
 pytest==9.0.2
 plotly
 requests
+beautifulsoup4
 datasets

@@ -128,7 +128,7 @@ flowchart LR
 
 - `hf_dataset` path для Hugging Face loader;
 - `api` path для JSON API endpoints через `requests`;
-- `scrape` path для local/demo HTML;
+- `scrape` path для local/demo HTML и selector-based web pages через `requests + BeautifulSoup`;
 - soft topic-aware filtering вместо fitness-only фильтра;
 - merge нескольких frame-like источников.
 
@@ -210,6 +210,7 @@ flowchart LR
 - GitHub discovery;
 - Hugging Face collection path;
 - JSON API collection path;
+- selector-based web scraping path;
 - approval-aware shortlist.
 
 Если online lookup не удался, пайплайн должен безопасно вернуться к стабильному пути и не ломать baseline.

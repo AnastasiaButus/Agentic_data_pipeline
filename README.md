@@ -225,10 +225,13 @@ HITL в проекте — это обязательный этап после a
 Ключевые HITL-артефакты:
 
 - `data/interim/review_queue.csv`
+- `reports/review_workspace.html`
 - `reports/review_queue_report.md`
 - `data/interim/review_queue_context.json`
 - `reports/review_merge_report.md`
 - `data/interim/review_merge_context.json`
+
+Если `review_queue.csv` не пустой, основной человеко-ориентированный вход в HITL теперь начинается с `reports/review_workspace.html`.
 
 ---
 
@@ -281,6 +284,7 @@ LLM используется только там, где он действите
 - `reports/annotation_trace_report.md`
 - `data/interim/annotation_trace.json`
 - `data/interim/review_queue.csv`
+- `reports/review_workspace.html`
 - `reports/review_queue_report.md`
 - `reports/review_merge_report.md`
 - `data/interim/model_metrics.json`
@@ -314,6 +318,7 @@ python run_pipeline.py --config configs/demo_minecraft.yaml
 - `reports/run_dashboard.html`
 - `final_report.md`
 - `reports/eda_report.html`
+- `reports/review_workspace.html` если нужен ручной HITL-review
 
 ### Основная CLI-команда
 

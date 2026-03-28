@@ -63,6 +63,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "approval_status: skipped_missing_file" in final_report
     assert "governance_report_path: reports/online_governance_report.md" in final_report
     assert "github_auth_mode: not_used" in final_report
+    assert "review_workspace_path: reports/review_workspace.html" in final_report
     assert "review_required:" in final_report
     assert "next_step:" in final_report
     approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
@@ -78,6 +79,10 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "ручной проверки после авторазметки" in review_queue_report
     assert "## Reviewer guide" in review_queue_report
     assert "## Next step" in review_queue_report
+    review_workspace = (tmp_path / "reports" / "review_workspace.html").read_text(encoding="utf-8")
+    assert "HITL Review Workspace" in review_workspace
+    assert "review_queue_corrected.csv" in review_workspace
+    assert "reviewed_effect_label" in review_workspace
     review_queue_context = json.loads((tmp_path / "data" / "interim" / "review_queue_context.json").read_text(encoding="utf-8"))
     assert review_queue_context["confidence_threshold"] == loaded_config.annotation.confidence_threshold
     assert review_queue_context["n_rows"] >= 0
@@ -133,6 +138,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "Pipeline Operator Dashboard" in dashboard_html
     assert "effective_mode: offline_demo" in dashboard_html
     assert "../final_report.md" in dashboard_html
+    assert "review_workspace.html" in dashboard_html
     assert "online_governance_report.md" in dashboard_html
     assert "review_queue_report.md" in dashboard_html
     assert "review_queue_corrected.csv" in dashboard_html

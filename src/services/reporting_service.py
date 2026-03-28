@@ -592,6 +592,424 @@ class ReportingService:
         self.registry.save_json(path, payload)
         return str(path)
 
+    def write_review_workspace(
+        self,
+        review_queue: Any,
+        confidence_threshold: float,
+        label_options: list[str],
+        *,
+        review_required: bool,
+        corrected_queue_found: bool,
+        corrected_queue_path: str,
+        review_status: str,
+        next_step: str,
+        dashboard_path: str,
+        final_report_path: str,
+        review_queue_report_path: str,
+        review_queue_context_path: str,
+        review_merge_report_path: str,
+        review_merge_context_path: str,
+    ) -> str:
+        """Write an HTML workspace for the HITL reviewer flow."""
+
+        rows = self._to_records(review_queue)
+        workspace_path = "reports/review_workspace.html"
+        preview_limit = 12
+        review_attention = review_required and not corrected_queue_found
+        visible_rows = rows[:preview_limit]
+
+        status_title = (
+            "Waiting for reviewer action"
+            if review_attention
+            else ("Corrected queue detected" if corrected_queue_found else "Review queue is clear")
+        )
+        status_body = (
+            "Low-confidence rows are waiting for human correction before the next merge and retrain."
+            if review_attention
+            else (
+                "This run found `review_queue_corrected.csv`, so reviewer edits can already be merged into the dataset."
+                if corrected_queue_found
+                else "The current run does not require manual correction, but the reviewer workspace remains available for inspection."
+            )
+        )
+        primary_action = (
+            "Fill `reviewed_effect_label`, optionally add `review_comment`, save `review_queue_corrected.csv`, then rerun the pipeline."
+            if review_attention
+            else (
+                "Inspect `review_merge_report.md` and confirm the reviewed labels were applied as expected."
+                if corrected_queue_found
+                else "Continue with the dashboard, final report, and training artifacts."
+            )
+        )
+
+        quick_links = [
+            {
+                "label": "Open operator dashboard",
+                "path": dashboard_path,
+                "description": "Return to the top-level run dashboard with the full pipeline state.",
+                "expected": False,
+            },
+            {
+                "label": "Open review guide",
+                "path": review_queue_report_path,
+                "description": "Markdown reviewer guide with step-by-step HITL instructions.",
+                "expected": False,
+            },
+            {
+                "label": "Open review queue CSV",
+                "path": "data/interim/review_queue.csv",
+                "description": "Editable queue exported from the low-confidence annotation rows.",
+                "expected": False,
+            },
+            {
+                "label": "Open corrected queue CSV",
+                "path": corrected_queue_path,
+                "description": "Expected reviewer output file that can be fed back into the pipeline.",
+                "expected": True,
+            },
+        ]
+        quick_links_html = "".join(
+            self._render_dashboard_link_tile(
+                workspace_path,
+                item["label"],
+                item["path"],
+                item["description"],
+                expected=bool(item["expected"]),
+            )
+            for item in quick_links
+        )
+
+        file_items = [
+            {"label": "Operator dashboard", "path": dashboard_path, "note": "Global entry point for the current run."},
+            {"label": "Final report", "path": final_report_path, "note": "Compact markdown summary for the full pipeline run."},
+            {"label": "Review guide", "path": review_queue_report_path, "note": "Step-by-step markdown guidance for the reviewer."},
+            {"label": "Review queue context", "path": review_queue_context_path, "note": "Machine-readable review metadata: threshold, labels, and expected columns."},
+            {"label": "Review queue CSV", "path": "data/interim/review_queue.csv", "note": "Input queue that should be inspected and corrected by the reviewer."},
+            {"label": "Corrected queue CSV", "path": corrected_queue_path, "note": "Human-edited CSV that the pipeline will merge on the next run.", "expected": True},
+            {"label": "Review merge report", "path": review_merge_report_path, "note": "What happened after the corrected queue was applied."},
+            {"label": "Review merge context", "path": review_merge_context_path, "note": "Machine-readable merge status for audit and debugging."},
+        ]
+        file_items_html = "".join(
+            self._render_dashboard_artifact_item(workspace_path, item)
+            for item in file_items
+            if self._normalize_artifact_reference(item.get("path"))
+        )
+
+        if review_attention:
+            checklist_items = [
+                "Open `data/interim/review_queue.csv` or inspect the table preview below.",
+                "Set `reviewed_effect_label` only to one of the allowed effect labels.",
+                "Optionally add `review_comment` and mark `human_verified=true` for confirmed rows.",
+                "Save the corrected file as `data/interim/review_queue_corrected.csv`.",
+                "Rerun the pipeline and confirm the result in `review_merge_report.md` and the dashboard.",
+            ]
+        elif corrected_queue_found:
+            checklist_items = [
+                "Inspect `review_merge_report.md` to confirm how reviewer edits affected the dataset.",
+                "If additional changes are still needed, update `review_queue_corrected.csv` and rerun the pipeline.",
+                "Use the dashboard and final report to confirm the post-review training artifacts.",
+            ]
+        else:
+            checklist_items = [
+                "Manual review is not required for this run because the low-confidence queue is empty.",
+                "Use the dashboard and final report to inspect the completed training and reporting artifacts.",
+            ]
+        checklist_html = "".join(f"<li>{self._escape_html(item)}</li>" for item in checklist_items)
+
+        if visible_rows:
+            table_headers = [
+                "id",
+                "source",
+                "effect_label",
+                "confidence",
+                "reviewed_effect_label",
+                "review_comment",
+                "human_verified",
+                "text",
+            ]
+            header_html = "".join(f"<th>{self._escape_html(column)}</th>" for column in table_headers)
+            body_html = "".join(
+                "<tr>"
+                f"<td>{self._escape_html(self._normalize_text(row.get('id')))}</td>"
+                f"<td>{self._escape_html(self._normalize_text(row.get('source')))}</td>"
+                f"<td>{self._escape_html(self._normalize_text(row.get('effect_label')))}</td>"
+                f"<td>{self._escape_html(self._format_numeric(row.get('confidence')))}</td>"
+                f"<td>{self._escape_html(self._normalize_text(row.get('reviewed_effect_label')))}</td>"
+                f"<td>{self._escape_html(self._truncate_text(row.get('review_comment'), limit=80))}</td>"
+                f"<td>{self._escape_html(self._normalize_text(row.get('human_verified')))}</td>"
+                f"<td>{self._escape_html(self._truncate_text(row.get('text'), limit=180))}</td>"
+                "</tr>"
+                for row in visible_rows
+            )
+            preview_note = (
+                f"Showing the first {preview_limit} rows from the review queue preview."
+                if len(rows) > preview_limit
+                else "The preview shows the current review queue rows for this run."
+            )
+            queue_preview_html = (
+                '<div class="table-shell">'
+                '<table class="queue-table">'
+                f"<thead><tr>{header_html}</tr></thead>"
+                f"<tbody>{body_html}</tbody>"
+                "</table>"
+                "</div>"
+                f'<p class="table-note">{self._escape_html(preview_note)}</p>'
+            )
+        else:
+            queue_preview_html = (
+                '<div class="empty-state">'
+                "<strong>No rows currently require manual review.</strong>"
+                "<p>The low-confidence queue is empty for this run, so the reviewer can use this page mainly as an audit and navigation hub.</p>"
+                "</div>"
+            )
+
+        html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HITL Review Workspace</title>
+  <style>
+    :root {{
+      --bg: #f3ede3;
+      --panel: rgba(255, 250, 243, 0.95);
+      --ink: #1f2a30;
+      --muted: #5d6a72;
+      --accent: #1f6f78;
+      --warm-soft: #fde7c7;
+      --line: rgba(31, 42, 48, 0.12);
+      --shadow: 0 20px 44px rgba(31, 42, 48, 0.10);
+      --radius: 22px;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: "Segoe UI Variable Text", "Trebuchet MS", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(31, 111, 120, 0.15), transparent 26%),
+        radial-gradient(circle at top right, rgba(217, 119, 6, 0.14), transparent 24%),
+        linear-gradient(180deg, #f8f3eb 0%, var(--bg) 100%);
+      min-height: 100vh;
+    }}
+    .shell {{ max-width: 1260px; margin: 0 auto; padding: 32px 20px 48px; }}
+    .hero, .panel, .metric-card {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }}
+    .hero {{ padding: 28px; position: relative; overflow: hidden; }}
+    .hero::after {{
+      content: "";
+      position: absolute;
+      inset: auto -50px -70px auto;
+      width: 210px;
+      height: 210px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(31, 111, 120, 0.15) 0%, transparent 70%);
+      pointer-events: none;
+    }}
+    .hero-grid {{ display: grid; grid-template-columns: 1.7fr 1fr; gap: 20px; align-items: start; }}
+    .eyebrow {{
+      text-transform: uppercase;
+      letter-spacing: 0.10em;
+      font-size: 12px;
+      color: var(--accent);
+      margin-bottom: 10px;
+      font-weight: 700;
+    }}
+    h1 {{ margin: 0 0 14px; font-size: clamp(2rem, 4vw, 3.2rem); line-height: 1.03; }}
+    .lede {{ margin: 0; color: var(--muted); line-height: 1.65; max-width: 760px; }}
+    .hero-meta {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }}
+    .meta-pill, .tag {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.82);
+    }}
+    .metrics {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-top: 24px; }}
+    .metric-card {{ padding: 16px; }}
+    .metric-label {{ font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }}
+    .metric-value {{ margin-top: 10px; font-size: 1.55rem; font-weight: 700; }}
+    .status-card {{
+      padding: 18px;
+      border-radius: var(--radius);
+      border: 1px solid transparent;
+      background: linear-gradient(135deg, #fff7eb, #ffe7c3);
+    }}
+    .status-card.ready {{
+      background: linear-gradient(135deg, #f4fffc, #ddf4ed);
+      border-color: rgba(31, 111, 120, 0.20);
+    }}
+    .status-card h2 {{ margin: 0 0 10px; font-size: 1.1rem; }}
+    .status-card p {{ margin: 0 0 10px; line-height: 1.55; }}
+    .layout {{ display: grid; grid-template-columns: 1.15fr 0.95fr; gap: 20px; margin-top: 20px; }}
+    .panel {{ padding: 22px; }}
+    .panel h2 {{ margin: 0 0 10px; font-size: 1.15rem; }}
+    .panel p {{ margin: 0; color: var(--muted); line-height: 1.6; }}
+    .tag-wrap {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }}
+    .checklist {{ margin: 16px 0 0; padding-left: 20px; color: var(--ink); }}
+    .checklist li {{ margin-top: 10px; line-height: 1.55; }}
+    .quick-links {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-top: 16px; }}
+    .link-tile {{
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      padding: 18px;
+      border-radius: var(--radius);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: 0 12px 28px rgba(31, 42, 48, 0.06);
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }}
+    .link-tile:hover {{ transform: translateY(-2px); box-shadow: 0 18px 34px rgba(31, 42, 48, 0.10); border-color: rgba(31, 111, 120, 0.24); }}
+    .link-tile .title {{ font-size: 1rem; font-weight: 700; }}
+    .link-tile .path {{ margin-top: 8px; font-family: "Cascadia Mono", "Consolas", monospace; font-size: 0.82rem; color: var(--accent); word-break: break-all; }}
+    .link-tile .description {{ margin-top: 8px; color: var(--muted); line-height: 1.5; font-size: 0.92rem; }}
+    .artifact-list {{ display: grid; gap: 10px; margin-top: 16px; }}
+    .artifact-item {{ border-top: 1px solid var(--line); padding-top: 10px; }}
+    .artifact-item:first-child {{ border-top: none; padding-top: 0; }}
+    .artifact-item a {{ color: var(--ink); text-decoration: none; font-weight: 600; }}
+    .artifact-item a:hover {{ color: var(--accent); }}
+    .artifact-status {{
+      display: inline-flex;
+      align-items: center;
+      margin-top: 6px;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: #edf7f4;
+      color: var(--accent);
+    }}
+    .artifact-status.expected {{ background: var(--warm-soft); color: #9a5a03; }}
+    .artifact-note {{ color: var(--muted); font-size: 0.92rem; line-height: 1.5; }}
+    .artifact-path {{ margin-top: 6px; font-family: "Cascadia Mono", "Consolas", monospace; font-size: 0.8rem; color: var(--accent); word-break: break-all; }}
+    .queue-panel {{ margin-top: 20px; }}
+    .table-shell {{ overflow-x: auto; margin-top: 16px; }}
+    .queue-table {{ width: 100%; border-collapse: collapse; min-width: 980px; }}
+    .queue-table th, .queue-table td {{
+      padding: 12px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 0.94rem;
+    }}
+    .queue-table th {{
+      font-size: 0.78rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: rgba(31, 111, 120, 0.06);
+      position: sticky;
+      top: 0;
+    }}
+    .table-note, .empty-state p {{ margin: 12px 0 0; color: var(--muted); line-height: 1.6; }}
+    .empty-state {{
+      margin-top: 16px;
+      border-radius: 18px;
+      padding: 18px;
+      background: rgba(244, 255, 252, 0.92);
+      border: 1px solid rgba(31, 111, 120, 0.16);
+    }}
+    @media (max-width: 960px) {{
+      .hero-grid, .layout {{ grid-template-columns: 1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="eyebrow">HITL Reviewer Entry Point</div>
+          <h1>HITL Review Workspace</h1>
+          <p class="lede">This page turns the review queue into a single human-facing workspace: what to check, which files to edit, which labels are allowed, and what the next pipeline action should be after reviewer edits.</p>
+          <div class="hero-meta">
+            <span class="meta-pill">project: {self._escape_html(getattr(self.ctx.config.project, "name", ""))}</span>
+            <span class="meta-pill">topic: {self._escape_html(getattr(self.ctx.config.request, "topic", ""))}</span>
+            <span class="meta-pill">review_status: {self._escape_html(review_status)}</span>
+          </div>
+          <div class="metrics">
+            <article class="metric-card">
+              <div class="metric-label">Queue rows</div>
+              <div class="metric-value">{self._escape_html(self._format_numeric(len(rows)))}</div>
+            </article>
+            <article class="metric-card">
+              <div class="metric-label">Threshold</div>
+              <div class="metric-value">{self._escape_html(self._format_numeric(confidence_threshold))}</div>
+            </article>
+            <article class="metric-card">
+              <div class="metric-label">Allowed labels</div>
+              <div class="metric-value">{self._escape_html(self._format_numeric(len(label_options)))}</div>
+            </article>
+            <article class="metric-card">
+              <div class="metric-label">Corrected queue</div>
+              <div class="metric-value">{self._escape_html("yes" if corrected_queue_found else "no")}</div>
+            </article>
+          </div>
+        </div>
+        <div class="status-card{' ready' if not review_attention else ''}">
+          <h2>{self._escape_html(status_title)}</h2>
+          <p>{self._escape_html(status_body)}</p>
+          <p><strong>Primary action:</strong> {self._escape_html(primary_action)}</p>
+          <p><strong>Next step:</strong> {self._escape_html(next_step)}</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <h2>Reviewer checklist</h2>
+        <p>Use only the approved effect-label vocabulary and keep reviewer edits explicit, traceable, and easy to merge back into the pipeline.</p>
+        <div class="tag-wrap">{self._render_dashboard_tag_list(label_options, empty_label="not set")}</div>
+        <ol class="checklist">{checklist_html}</ol>
+      </div>
+      <div class="panel">
+        <h2>Open first</h2>
+        <p>These links are the fastest path through the HITL workflow for the current run.</p>
+        <div class="quick-links">{quick_links_html}</div>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <h2>Review files and status</h2>
+        <p>Expected inputs stay visible even when they are still missing, so the reviewer always sees where the next manual file should appear.</p>
+        <div class="artifact-list">{file_items_html}</div>
+      </div>
+      <div class="panel">
+        <h2>Editable columns</h2>
+        <p>The reviewer mainly works with `reviewed_effect_label`, `review_comment`, and `human_verified`, while keeping the original annotation fields available for context.</p>
+        <div class="tag-wrap">
+          <span class="tag">reviewed_effect_label</span>
+          <span class="tag">review_comment</span>
+          <span class="tag">human_verified</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel queue-panel">
+      <h2>Queue preview</h2>
+      <p>This preview mirrors the current low-confidence queue so the reviewer can orient quickly before opening the CSV.</p>
+      {queue_preview_html}
+    </section>
+  </div>
+</body>
+</html>"""
+
+        path = Path(workspace_path)
+        self.registry.save_text(path, html)
+        return str(path)
+
     def write_review_merge_report(
         self,
         corrected_queue_found: bool,
@@ -829,9 +1247,19 @@ class ReportingService:
                 "description": "Наглядный HTML-отчёт для демонстрации данных.",
             },
             {
+                "label": "Open review workspace",
+                "path": review.get("review_workspace_path"),
+                "description": "Reviewer-facing HTML workspace for HITL queue, files, and next actions.",
+            },
+            {
                 "label": "Open review guide",
                 "path": review.get("review_queue_report_path"),
                 "description": "Инструкция и очередь ручной проверки для HITL.",
+            },
+            {
+                "label": "Open review merge report",
+                "path": review.get("review_merge_report_path"),
+                "description": "What the pipeline observed after corrected labels were merged back in.",
             },
             {
                 "label": "Open source shortlist",
@@ -1130,6 +1558,14 @@ class ReportingService:
         if value is None:
             return ""
         return str(value).strip()
+
+    def _truncate_text(self, value: Any, *, limit: int) -> str:
+        """Trim long free-text fields so HTML tables stay readable."""
+
+        text = self._normalize_text(value)
+        if len(text) <= limit:
+            return text
+        return text[: max(0, limit - 3)].rstrip() + "..."
 
     def _coerce_float(self, value: Any) -> float:
         """Convert a value to float while tolerating missing confidences."""

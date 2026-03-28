@@ -211,6 +211,59 @@ def test_review_queue_report_and_context_make_hitl_steps_explicit(tmp_path: Path
     assert "reviewed_effect_label" in payload["review_columns"]
 
 
+def test_review_workspace_is_created_and_surfaces_hitl_inputs(tmp_path: Path) -> None:
+    """The reviewer workspace should expose queue rows, files, and next-step guidance in one HTML page."""
+
+    service = ReportingService(_make_context(tmp_path))
+    review_queue = _Frame(
+        [
+            {
+                "id": "1",
+                "source": "HF",
+                "text": "energy boost after morning use",
+                "label": None,
+                "effect_label": "energy",
+                "confidence": 0.42,
+                "reviewed_effect_label": "",
+                "review_comment": "",
+                "human_verified": False,
+            }
+        ]
+    )
+    service.registry.save_markdown("final_report.md", "# Final Report\n")
+    service.registry.save_markdown("reports/review_queue_report.md", "# Review Queue\n")
+    service.registry.save_markdown("reports/review_merge_report.md", "# Review Merge\n")
+    service.registry.save_json("data/interim/review_queue_context.json", {"current_stage": "human_review"})
+    service.registry.save_json("data/interim/review_merge_context.json", {"review_status": "skipped_missing_corrected_queue"})
+    service.registry.save_text("data/interim/review_queue.csv", "id\n1\n")
+
+    workspace_path = service.write_review_workspace(
+        review_queue,
+        0.6,
+        ["energy", "side_effects", "other"],
+        review_required=True,
+        corrected_queue_found=False,
+        corrected_queue_path="data/interim/review_queue_corrected.csv",
+        review_status="skipped_missing_corrected_queue",
+        next_step="human review rerun recommended before final retrain",
+        dashboard_path="reports/run_dashboard.html",
+        final_report_path="final_report.md",
+        review_queue_report_path="reports/review_queue_report.md",
+        review_queue_context_path="data/interim/review_queue_context.json",
+        review_merge_report_path="reports/review_merge_report.md",
+        review_merge_context_path="data/interim/review_merge_context.json",
+    )
+    html = (tmp_path / workspace_path).read_text(encoding="utf-8")
+
+    assert "HITL Review Workspace" in html
+    assert "Waiting for reviewer action" in html
+    assert "review_queue_corrected.csv" in html
+    assert "reviewed_effect_label" in html
+    assert "energy boost after morning use" in html
+    assert 'href="../final_report.md"' in html
+    assert 'href="review_queue_report.md"' in html
+
+
 def test_review_merge_report_explains_next_step(tmp_path: Path) -> None:
     """The merge report should explain what happens after HITL merge."""
 
@@ -238,6 +291,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     service.registry.save_markdown("final_report.md", "# Final Report\n")
     service.registry.save_markdown("reports/source_report.md", "# Source Report\n")
     service.registry.save_markdown("reports/online_governance_report.md", "# Online Governance\n")
+    service.registry.save_text("reports/review_workspace.html", "<html><body>Review Workspace</body></html>")
     service.registry.save_text("reports/eda_report.html", "<html><body>EDA</body></html>")
     service.registry.save_markdown("reports/review_queue_report.md", "# Review Queue\n")
     service.registry.save_markdown("reports/review_merge_report.md", "# Review Merge\n")
@@ -299,6 +353,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
             "status": "skipped_missing_corrected_queue",
             "review_queue_rows": 1,
             "review_required": True,
+            "review_workspace_path": "reports/review_workspace.html",
             "review_queue_report_path": "reports/review_queue_report.md",
             "review_queue_context_path": "data/interim/review_queue_context.json",
             "review_merge_report_path": "reports/review_merge_report.md",
@@ -325,6 +380,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     assert "effective_mode: offline_demo" in html
     assert 'href="../final_report.md"' in html
     assert 'href="eda_report.html"' in html
+    assert 'href="review_workspace.html"' in html
     assert 'href="online_governance_report.md"' in html
     assert "../data/interim/model_artifact.pkl" in html
     assert "Corrected queue CSV" in html

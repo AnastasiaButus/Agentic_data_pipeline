@@ -198,6 +198,7 @@ class PipelineController:
         dashboard_status = "attention_required" if review_required and corrected_queue is None else "completed"
         dashboard_stage = "human_review" if review_required and corrected_queue is None else "completed"
         final_report_path = "final_report.md"
+        review_workspace_path = "reports/review_workspace.html"
 
         final_summary = {
             "runtime": runtime_summary,
@@ -245,6 +246,7 @@ class PipelineController:
                 "review_required": review_required,
                 "reviewer_action": reviewer_action,
                 "next_step": next_step,
+                "review_workspace_path": review_workspace_path,
                 "review_queue_report_path": review_queue_report_path,
                 "review_queue_context_path": review_queue_context_path,
                 "review_merge_report_path": review_merge_report_path,
@@ -264,7 +266,39 @@ class PipelineController:
         }
 
         final_report_path = self.reporting_service.write_final_report(final_summary)
+        review_workspace_path = self.reporting_service.write_review_workspace(
+            review_queue,
+            review_threshold,
+            label_options,
+            review_required=review_required,
+            corrected_queue_found=review_merge_summary["corrected_queue_found"],
+            corrected_queue_path=review_merge_summary["corrected_queue_path"],
+            review_status=review_merge_summary["review_status"],
+            next_step=next_step,
+            dashboard_path=dashboard_path,
+            final_report_path=final_report_path,
+            review_queue_report_path=review_queue_report_path,
+            review_queue_context_path=review_queue_context_path,
+            review_merge_report_path=review_merge_report_path,
+            review_merge_context_path=review_merge_context_path,
+        )
         dashboard_path = self.reporting_service.write_run_dashboard(final_summary)
+        review_workspace_path = self.reporting_service.write_review_workspace(
+            review_queue,
+            review_threshold,
+            label_options,
+            review_required=review_required,
+            corrected_queue_found=review_merge_summary["corrected_queue_found"],
+            corrected_queue_path=review_merge_summary["corrected_queue_path"],
+            review_status=review_merge_summary["review_status"],
+            next_step=next_step,
+            dashboard_path=dashboard_path,
+            final_report_path=final_report_path,
+            review_queue_report_path=review_queue_report_path,
+            review_queue_context_path=review_queue_context_path,
+            review_merge_report_path=review_merge_report_path,
+            review_merge_context_path=review_merge_context_path,
+        )
 
         return {
             "sources": sources,
@@ -286,6 +320,7 @@ class PipelineController:
                 "annotation_report": annotation_report_path,
                 "annotation_trace_report": annotation_trace_report_path,
                 "annotation_trace_context": annotation_trace_context_path,
+                "review_workspace": review_workspace_path,
                 "review_queue_report": review_queue_report_path,
                 "review_queue_context": review_queue_context_path,
                 "review_merge_report": review_merge_report_path,

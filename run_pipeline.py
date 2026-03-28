@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import webbrowser
 from pathlib import Path
@@ -39,12 +40,16 @@ def _print_run_summary(ctx: PipelineContext, result: dict[str, Any]) -> None:
     print(f"Runtime mode: {result.get('runtime_mode', 'unknown')}")
     if dashboard_path is not None:
         print(f"Dashboard: {dashboard_path}")
+        print(f"Dashboard URL: {dashboard_path.as_uri()}")
     if final_report_path is not None:
         print(f"Final report: {final_report_path}")
+        print(f"Final report URL: {final_report_path.as_uri()}")
     if eda_html_path is not None:
         print(f"EDA HTML: {eda_html_path}")
+        print(f"EDA HTML URL: {eda_html_path.as_uri()}")
     if review_workspace_path is not None:
         print(f"Review workspace: {review_workspace_path}")
+        print(f"Review workspace URL: {review_workspace_path.as_uri()}")
 
     review_status = str(result.get("review_status", "") or "")
     if review_status == "skipped_missing_corrected_queue":
@@ -59,6 +64,16 @@ def _open_artifact(path: Path | None) -> None:
     webbrowser.open(path.as_uri())
 
 
+def _should_open_dashboard_by_default() -> bool:
+    """Open the dashboard automatically in normal CLI runs, but stay quiet under pytest/CI."""
+
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return False
+    if os.getenv("CI"):
+        return False
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse CLI arguments, load the config, and execute the pipeline."""
 
@@ -68,6 +83,11 @@ def main(argv: list[str] | None = None) -> int:
         "--open-dashboard",
         action="store_true",
         help="Open reports/run_dashboard.html after a successful run",
+    )
+    parser.add_argument(
+        "--no-open-dashboard",
+        action="store_true",
+        help="Do not open the dashboard automatically after a successful run",
     )
     parser.add_argument(
         "--open-review-workspace",
@@ -82,7 +102,10 @@ def main(argv: list[str] | None = None) -> int:
     result = controller.run()
     _print_run_summary(ctx, result)
 
-    if args.open_dashboard:
+    should_open_dashboard = args.open_dashboard or (
+        not args.no_open_dashboard and _should_open_dashboard_by_default()
+    )
+    if should_open_dashboard:
         _open_artifact(_resolve_report_path(ctx, result, "dashboard"))
     if args.open_review_workspace:
         _open_artifact(_resolve_report_path(ctx, result, "review_workspace"))

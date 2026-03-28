@@ -198,3 +198,35 @@ def test_text_topic_template_config_loads_from_repo() -> None:
     assert config.annotation.use_llm is False
     assert config.annotation.effect_labels == ["class_one", "class_two", "other"]
     assert config.runtime.mode == "online"
+
+
+def test_text_topic_online_config_loads_from_repo() -> None:
+    """The dedicated online text-topic config should expose the intended remote source flags."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    config_path = repo_root / "configs" / "text_topic_online.yaml"
+
+    config = load_config(config_path)
+
+    assert config.project.name == "universal-agentic-data-pipeline-text-topic-online"
+    assert config.request.modality == "text"
+    assert config.source.use_huggingface is True
+    assert config.source.use_github_search is True
+    assert config.source.use_scraping_fallback is False
+    assert config.runtime.mode == "online"
+
+
+def test_text_topic_hybrid_config_loads_from_repo() -> None:
+    """The dedicated hybrid text-topic config should preserve the mixed-mode runtime contract."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    config_path = repo_root / "configs" / "text_topic_hybrid.yaml"
+
+    config = load_config(config_path)
+
+    assert config.project.name == "universal-agentic-data-pipeline-text-topic-hybrid"
+    assert config.request.modality == "text"
+    assert config.source.use_huggingface is True
+    assert config.source.use_github_search is True
+    assert config.source.use_scraping_fallback is True
+    assert config.runtime.mode == "hybrid"

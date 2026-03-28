@@ -247,6 +247,8 @@ runtime:
 Для запуска на новой теме теперь есть безопасный шаблон:
 
 - `configs/text_topic_template.yaml`
+- `configs/text_topic_online.yaml`
+- `configs/text_topic_hybrid.yaml`
 
 Этот шаблон нужен для сценария:
 
@@ -260,6 +262,8 @@ runtime:
 - шаблон рассчитан на **текстовую классификацию**, а не на audio/image задачи;
 - текущий training layer и active learning layer работают с полями `text` и `effect_label`;
 - если вы запускаете проект на новой теме, лучше начинать с малого числа классов и понятного `effect_labels` vocabulary.
+- `text_topic_online.yaml` включает чистый remote-discovery сценарий для non-demo запуска;
+- `text_topic_hybrid.yaml` включает remote-discovery + scraping flags в одном конфиге, но built-in offline demo fixtures по-прежнему принадлежат только `demo_*` конфигам.
 
 ---
 

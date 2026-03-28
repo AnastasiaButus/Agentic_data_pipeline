@@ -603,6 +603,50 @@ def test_explicit_online_mode_ignores_demo_project_and_uses_remote_search(monkey
     assert discovered[0].source_id == "fitness/supplements-reviews"
 
 
+def test_non_demo_hybrid_mode_uses_remote_search_without_built_in_demo_candidates(monkeypatch, tmp_path: Path) -> None:
+    """Hybrid mode on a non-demo project should still use remote discovery and avoid built-in demo fixtures."""
+
+    config = AppConfig(
+        project=ProjectConfig(name="universal-agentic-data-pipeline-text-topic-hybrid", root_dir=tmp_path),
+        source=SourceConfig(use_huggingface=True, use_github_search=True, use_scraping_fallback=True),
+        annotation=AnnotationConfig(),
+        runtime=RuntimeConfig(mode="hybrid"),
+    )
+    context = PipelineContext.from_config(config)
+    context.config.request.topic = "board game reviews"
+    registry = FakeRegistry()
+    service = SourceDiscoveryService(context, registry=registry)
+
+    monkeypatch.setattr(service, "_fetch_huggingface_datasets", lambda topic: {
+        "datasets": [
+            {
+                "id": "boardgames/reviews",
+                "title": "Board Game Reviews",
+                "downloads": 321,
+                "likes": 12,
+                "tags": ["reviews", "text-classification"],
+            }
+        ]
+    })
+    monkeypatch.setattr(service, "_fetch_github_repositories", lambda topic: {
+        "items": [
+            {
+                "full_name": "octocat/boardgames-review-tools",
+                "html_url": "https://github.com/octocat/boardgames-review-tools",
+                "stargazers_count": 15,
+                "language": "Python",
+                "description": "Board game review helpers",
+                "topics": ["reviews", "boardgames"],
+            }
+        ]
+    })
+
+    discovered = service.run()
+
+    assert [candidate.source_type for candidate in discovered] == ["hf_dataset", "github_repo"]
+    assert all(not candidate.source_id.startswith("demo_") for candidate in discovered)
+
+
 def test_local_only_mode_skips_remote_search_even_when_flags_are_enabled(monkeypatch, tmp_path: Path) -> None:
     """Local-only mode should not call remote discovery helpers even when flags are on."""
 

@@ -91,6 +91,26 @@ def test_build_runtime_summary_distinguishes_configured_vs_active_remote_sources
     assert summary["active_remote_source_types"] == []
 
 
+def test_build_runtime_summary_for_generic_hybrid_config_keeps_remote_paths_active_without_demo_sources(tmp_path: Path) -> None:
+    """Non-demo hybrid configs should keep remote providers active without pretending built-in demos exist."""
+
+    config = _make_config(
+        tmp_path,
+        project_name="universal-agentic-data-pipeline-text-topic-hybrid",
+        source=SourceConfig(use_huggingface=True, use_github_search=True, use_scraping_fallback=True),
+        runtime=RuntimeConfig(mode="hybrid"),
+    )
+
+    summary = build_runtime_summary(config)
+
+    assert summary["requested_mode"] == "hybrid"
+    assert summary["effective_mode"] == "hybrid"
+    assert summary["demo_sources_enabled"] is False
+    assert summary["remote_sources_enabled"] is True
+    assert summary["configured_remote_source_types"] == ["hf_dataset", "github_repo", "scrape"]
+    assert summary["active_remote_source_types"] == ["hf_dataset", "github_repo", "scrape"]
+
+
 def test_validate_runtime_mode_normalizes_hyphenated_values() -> None:
     """Hyphenated runtime values from YAML or CLI-like inputs should normalize cleanly."""
 

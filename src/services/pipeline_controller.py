@@ -14,6 +14,7 @@ from src.core.runtime import build_runtime_summary
 from src.providers.llm.gemini_client import GeminiClient
 from src.providers.llm.mock_llm import MockLLM
 from src.services.review_queue_service import CORRECTED_QUEUE_PATH, ReviewQueueService
+from src.services.review_agreement import build_review_agreement_summary
 from src.services.reporting_service import ReportingService
 from src.services.source_governance import build_online_governance_summary
 from src.services.source_discovery_service import SourceDiscoveryService
@@ -168,6 +169,9 @@ class PipelineController:
             review_merge_summary["reviewed_effect_labels"],
             review_merge_summary["review_status"],
         )
+        review_agreement_summary = build_review_agreement_summary(annotated, corrected_queue)
+        review_agreement_report_path = self.reporting_service.write_review_agreement_report(review_agreement_summary)
+        review_agreement_context_path = self.reporting_service.write_review_agreement_context(review_agreement_summary)
 
         reviewed_rows = self._to_records(reviewed)
         al_seed_size = max(1, min(50, len(reviewed_rows) // 2 if len(reviewed_rows) > 1 else 1))
@@ -252,6 +256,15 @@ class PipelineController:
                 "review_merge_report_path": review_merge_report_path,
                 "review_merge_context_path": review_merge_context_path,
             },
+            "agreement": {
+                "agreement_report_path": review_agreement_report_path,
+                "agreement_context_path": review_agreement_context_path,
+                "comparison_scope": review_agreement_summary.get("comparison_scope"),
+                "compared_rows": review_agreement_summary.get("compared_rows"),
+                "agreement": review_agreement_summary.get("agreement"),
+                "kappa": review_agreement_summary.get("kappa"),
+                "kappa_status": review_agreement_summary.get("kappa_status"),
+            },
             "approval": {
                 "approved_sources_path": "data/raw/approved_sources.json",
                 "n_approved_sources": len(approved_sources),
@@ -325,6 +338,8 @@ class PipelineController:
                 "review_queue_context": review_queue_context_path,
                 "review_merge_report": review_merge_report_path,
                 "review_merge_context": review_merge_context_path,
+                "review_agreement_report": review_agreement_report_path,
+                "review_agreement_context": review_agreement_context_path,
                 "al_report": al_report_path,
                 "dashboard": dashboard_path,
                 "final_report": final_report_path,

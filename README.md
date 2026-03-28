@@ -230,8 +230,11 @@ HITL в проекте — это обязательный этап после a
 - `data/interim/review_queue_context.json`
 - `reports/review_merge_report.md`
 - `data/interim/review_merge_context.json`
+- `reports/review_agreement_report.md`
+- `data/interim/review_agreement_context.json`
 
 Если `review_queue.csv` не пустой, основной человеко-ориентированный вход в HITL теперь начинается с `reports/review_workspace.html`.
+После повторного запуска с `review_queue_corrected.csv` pipeline также считает честную метрику `auto-vs-human agreement` и `Cohen's kappa` на reviewed subset. Это не два независимых human annotators, а quality-control метрика для HITL-правок.
 
 ---
 
@@ -287,6 +290,8 @@ LLM используется только там, где он действите
 - `reports/review_workspace.html`
 - `reports/review_queue_report.md`
 - `reports/review_merge_report.md`
+- `data/interim/review_agreement_context.json`
+- `reports/review_agreement_report.md`
 - `data/interim/model_metrics.json`
 - `data/interim/model_artifact.pkl`
 - `data/interim/vectorizer_artifact.pkl`

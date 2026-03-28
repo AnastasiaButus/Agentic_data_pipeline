@@ -55,6 +55,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "## Approval" in final_report
     assert "## EDA" in final_report
     assert "## Annotation" in final_report
+    assert "## Agreement" in final_report
     assert "eda_report_path" in final_report
     assert "eda_html_report_path" in final_report
     assert "eda_context_path" in final_report
@@ -64,6 +65,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "governance_report_path: reports/online_governance_report.md" in final_report
     assert "github_auth_mode: not_used" in final_report
     assert "review_workspace_path: reports/review_workspace.html" in final_report
+    assert "agreement_report_path: reports/review_agreement_report.md" in final_report
     assert "review_required:" in final_report
     assert "next_step:" in final_report
     approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
@@ -83,6 +85,12 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "HITL Review Workspace" in review_workspace
     assert "review_queue_corrected.csv" in review_workspace
     assert "reviewed_effect_label" in review_workspace
+    agreement_report = (tmp_path / "reports" / "review_agreement_report.md").read_text(encoding="utf-8")
+    agreement_context = json.loads((tmp_path / "data" / "interim" / "review_agreement_context.json").read_text(encoding="utf-8"))
+    assert "Review agreement report" in agreement_report
+    assert "compared_rows: 0" in agreement_report
+    assert agreement_context["compared_rows"] == 0
+    assert agreement_context["kappa_status"] == "not_available_no_compared_rows"
     review_queue_context = json.loads((tmp_path / "data" / "interim" / "review_queue_context.json").read_text(encoding="utf-8"))
     assert review_queue_context["confidence_threshold"] == loaded_config.annotation.confidence_threshold
     assert review_queue_context["n_rows"] >= 0
@@ -138,6 +146,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "Pipeline Operator Dashboard" in dashboard_html
     assert "effective_mode: offline_demo" in dashboard_html
     assert "../final_report.md" in dashboard_html
+    assert "review_agreement_report.md" in dashboard_html
     assert "review_workspace.html" in dashboard_html
     assert "online_governance_report.md" in dashboard_html
     assert "review_queue_report.md" in dashboard_html
@@ -1199,8 +1208,13 @@ def test_review_merge_report_marks_changed_effect_labels(monkeypatch, tmp_path: 
     assert merge_context["n_rows_with_reviewed_effect_label"] == 1
     assert merge_context["n_effect_label_changes"] == 1
     assert merge_context["review_status"] == "merged"
+    agreement_context = json.loads((tmp_path / "data" / "interim" / "review_agreement_context.json").read_text(encoding="utf-8"))
+    assert agreement_context["compared_rows"] == 1
+    assert agreement_context["agreement"] == 0.0
+    assert agreement_context["kappa"] is None
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
     assert "review_merge_report_path" in final_report
+    assert "agreement_report_path: reports/review_agreement_report.md" in final_report
 
 
 def test_review_merge_summary_ignores_missing_ids(monkeypatch, tmp_path: Path) -> None:
@@ -1467,6 +1481,10 @@ def test_review_merge_status_merged_no_changes_when_corrected_queue_has_no_effec
     assert merge_context["n_rows_with_reviewed_effect_label"] == 0
     assert merge_context["n_effect_label_changes"] == 0
     assert merge_context["review_status"] == "merged_no_changes"
+    agreement_context = json.loads((tmp_path / "data" / "interim" / "review_agreement_context.json").read_text(encoding="utf-8"))
+    assert agreement_context["compared_rows"] == 0
+    assert agreement_context["agreement"] is None
+    assert agreement_context["kappa_status"] == "not_available_no_compared_rows"
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
     assert "review_merge_report_path" in final_report
     assert "status: merged_no_changes" in final_report
@@ -1606,6 +1624,9 @@ def test_review_merge_status_stays_merged_when_corrected_queue_has_effect_change
     assert merge_context["n_rows_with_reviewed_effect_label"] == 1
     assert merge_context["n_effect_label_changes"] == 1
     assert merge_context["review_status"] == "merged"
+    agreement_context = json.loads((tmp_path / "data" / "interim" / "review_agreement_context.json").read_text(encoding="utf-8"))
+    assert agreement_context["compared_rows"] == 1
+    assert agreement_context["agreement"] == 0.0
     final_report = (tmp_path / "final_report.md").read_text(encoding="utf-8")
     assert "review_merge_report_path" in final_report
     assert "status: merged" in final_report

@@ -140,6 +140,51 @@ def test_online_governance_report_and_context_are_created(tmp_path: Path) -> Non
     assert context["github_auth_mode"] == "unauthenticated"
 
 
+def test_review_agreement_report_and_context_are_created(tmp_path: Path) -> None:
+    """Agreement reporting should produce both markdown and machine-readable artifacts."""
+
+    service = ReportingService(_make_context(tmp_path))
+    summary = {
+        "comparison_scope": "auto_vs_human_reviewed_subset",
+        "corrected_queue_found": True,
+        "n_corrected_rows": 3,
+        "n_reviewed_rows": 3,
+        "compared_rows": 3,
+        "matched_rows": 2,
+        "disagreement_rows": 1,
+        "agreement": 2 / 3,
+        "kappa": 0.4,
+        "kappa_status": "computed",
+        "auto_label_distribution": {"energy": 1, "side_effects": 1, "other": 1},
+        "human_label_distribution": {"energy": 2, "other": 1},
+        "disagreement_examples": [
+            {
+                "id": "2",
+                "source": "Web",
+                "auto_effect_label": "side_effects",
+                "reviewed_effect_label": "energy",
+                "confidence": 0.3,
+                "text_preview": "rash",
+            }
+        ],
+        "notes": ["This metric measures auto-vs-human agreement on the reviewed subset."],
+    }
+
+    report_path = service.write_review_agreement_report(summary)
+    context_path = service.write_review_agreement_context(summary)
+
+    report = (tmp_path / report_path).read_text(encoding="utf-8")
+    context = json.loads((tmp_path / context_path).read_text(encoding="utf-8"))
+
+    assert "Review agreement report" in report
+    assert "comparison_scope: auto_vs_human_reviewed_subset" in report
+    assert "agreement: 0.667" in report
+    assert "kappa: 0.4" in report
+    assert "Disagreement examples" in report
+    assert context["compared_rows"] == 3
+    assert context["kappa_status"] == "computed"
+
+
 def test_source_report_and_approval_candidates_include_compliance_fields(tmp_path: Path) -> None:
     """Approval-facing source artifacts should surface license and robots metadata explicitly."""
 
@@ -291,12 +336,14 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     service.registry.save_markdown("final_report.md", "# Final Report\n")
     service.registry.save_markdown("reports/source_report.md", "# Source Report\n")
     service.registry.save_markdown("reports/online_governance_report.md", "# Online Governance\n")
+    service.registry.save_markdown("reports/review_agreement_report.md", "# Agreement\n")
     service.registry.save_text("reports/review_workspace.html", "<html><body>Review Workspace</body></html>")
     service.registry.save_text("reports/eda_report.html", "<html><body>EDA</body></html>")
     service.registry.save_markdown("reports/review_queue_report.md", "# Review Queue\n")
     service.registry.save_markdown("reports/review_merge_report.md", "# Review Merge\n")
     service.registry.save_json("data/interim/review_queue_context.json", {"current_stage": "human_review"})
     service.registry.save_json("data/interim/review_merge_context.json", {"review_status": "skipped_missing_corrected_queue"})
+    service.registry.save_json("data/interim/review_agreement_context.json", {"compared_rows": 0})
     service.registry.save_json("data/raw/approval_candidates.json", [{"source_id": "demo"}])
     service.registry.save_json("data/raw/discovered_sources.json", [{"source_id": "demo"}])
     service.registry.save_json("data/raw/online_governance_summary.json", {"github_auth_mode": "unauthenticated"})
@@ -360,6 +407,15 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
             "review_merge_context_path": "data/interim/review_merge_context.json",
             "next_step": "human review rerun recommended before final retrain",
         },
+        "agreement": {
+            "agreement_report_path": "reports/review_agreement_report.md",
+            "agreement_context_path": "data/interim/review_agreement_context.json",
+            "comparison_scope": "auto_vs_human_reviewed_subset",
+            "compared_rows": 0,
+            "agreement": None,
+            "kappa": None,
+            "kappa_status": "not_available_no_compared_rows",
+        },
         "approval": {
             "approved_sources_path": "data/raw/approved_sources.json",
             "approval_status": "skipped_missing_file",
@@ -380,6 +436,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     assert "effective_mode: offline_demo" in html
     assert 'href="../final_report.md"' in html
     assert 'href="eda_report.html"' in html
+    assert 'href="review_agreement_report.md"' in html
     assert 'href="review_workspace.html"' in html
     assert 'href="online_governance_report.md"' in html
     assert "../data/interim/model_artifact.pkl" in html

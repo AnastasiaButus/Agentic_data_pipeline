@@ -1092,6 +1092,72 @@ class ReportingService:
         self.registry.save_json(path, payload)
         return str(path)
 
+    def write_review_agreement_report(self, summary: dict[str, Any]) -> str:
+        """Write a human-facing agreement report for the reviewed subset."""
+
+        lines = [
+            "# Review agreement report",
+            "",
+            "This report measures auto-vs-human agreement on the reviewed subset. It is not inter-reviewer agreement between two independent human annotators.",
+            "",
+            f"- comparison_scope: {self._normalize_text(summary.get('comparison_scope'))}",
+            f"- corrected_queue_found: {summary.get('corrected_queue_found')}",
+            f"- n_corrected_rows: {summary.get('n_corrected_rows')}",
+            f"- n_reviewed_rows: {summary.get('n_reviewed_rows')}",
+            f"- compared_rows: {summary.get('compared_rows')}",
+            f"- matched_rows: {summary.get('matched_rows')}",
+            f"- disagreement_rows: {summary.get('disagreement_rows')}",
+            f"- agreement: {self._format_numeric(summary.get('agreement')) if summary.get('agreement') is not None else 'n/a'}",
+            f"- kappa: {self._format_numeric(summary.get('kappa')) if summary.get('kappa') is not None else 'n/a'}",
+            f"- kappa_status: {self._normalize_text(summary.get('kappa_status'))}",
+        ]
+
+        notes = summary.get("notes", []) if isinstance(summary.get("notes"), list) else []
+        if notes:
+            lines.extend(["", "## Notes"])
+            for note in notes:
+                lines.append(f"- {self._normalize_text(note)}")
+
+        auto_distribution = summary.get("auto_label_distribution", {})
+        human_distribution = summary.get("human_label_distribution", {})
+        if isinstance(auto_distribution, dict) or isinstance(human_distribution, dict):
+            lines.extend(
+                [
+                    "",
+                    "## Label distribution",
+                    f"- auto_label_distribution: {auto_distribution if isinstance(auto_distribution, dict) else {}}",
+                    f"- human_label_distribution: {human_distribution if isinstance(human_distribution, dict) else {}}",
+                ]
+            )
+
+        disagreement_examples = summary.get("disagreement_examples", []) if isinstance(summary.get("disagreement_examples"), list) else []
+        if disagreement_examples:
+            lines.extend(["", "## Disagreement examples"])
+            for row in disagreement_examples:
+                if not isinstance(row, dict):
+                    continue
+                lines.append(
+                    "- id: {id} | source: {source} | auto_effect_label: {auto} | reviewed_effect_label: {human} | confidence: {confidence} | text_preview: {text}".format(
+                        id=self._normalize_text(row.get("id")),
+                        source=self._normalize_text(row.get("source")),
+                        auto=self._normalize_text(row.get("auto_effect_label")),
+                        human=self._normalize_text(row.get("reviewed_effect_label")),
+                        confidence=self._format_numeric(row.get("confidence")) if row.get("confidence") is not None else "n/a",
+                        text=self._normalize_text(row.get("text_preview")),
+                    )
+                )
+
+        path = "reports/review_agreement_report.md"
+        self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
+        return path
+
+    def write_review_agreement_context(self, summary: dict[str, Any]) -> str:
+        """Write the machine-readable agreement summary for the reviewed subset."""
+
+        path = Path("data/interim/review_agreement_context.json")
+        self.registry.save_json(path, summary)
+        return str(path)
+
     def write_final_report(self, summary: dict[str, Any]) -> str:
         """Write the final end-to-end markdown report for the demo pipeline."""
 
@@ -1105,12 +1171,13 @@ class ReportingService:
             "eda": "EDA",
             "annotation": "Annotation",
             "review": "Review",
+            "agreement": "Agreement",
             "approval": "Approval",
             "active_learning": "Active Learning",
             "training": "Training",
             "artifacts": "Artifacts",
         }
-        for section_name in ["runtime", "dashboard", "sources", "online_governance", "quality", "eda", "annotation", "review", "approval", "active_learning", "training", "artifacts"]:
+        for section_name in ["runtime", "dashboard", "sources", "online_governance", "quality", "eda", "annotation", "review", "agreement", "approval", "active_learning", "training", "artifacts"]:
             section = summary.get(section_name)
             lines.append(f"## {section_titles[section_name]}")
             lines.append("")
@@ -1197,6 +1264,7 @@ class ReportingService:
         eda = summary.get("eda", {}) if isinstance(summary.get("eda"), dict) else {}
         annotation = summary.get("annotation", {}) if isinstance(summary.get("annotation"), dict) else {}
         review = summary.get("review", {}) if isinstance(summary.get("review"), dict) else {}
+        agreement = summary.get("agreement", {}) if isinstance(summary.get("agreement"), dict) else {}
         approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
         training = summary.get("training", {}) if isinstance(summary.get("training"), dict) else {}
 
@@ -1260,6 +1328,11 @@ class ReportingService:
                 "label": "Open review merge report",
                 "path": review.get("review_merge_report_path"),
                 "description": "What the pipeline observed after corrected labels were merged back in.",
+            },
+            {
+                "label": "Open agreement report",
+                "path": agreement.get("agreement_report_path"),
+                "description": "Auto-vs-human agreement and Cohen's kappa on the reviewed subset.",
             },
             {
                 "label": "Open source shortlist",
@@ -1730,6 +1803,7 @@ class ReportingService:
         eda = summary.get("eda", {}) if isinstance(summary.get("eda"), dict) else {}
         annotation = summary.get("annotation", {}) if isinstance(summary.get("annotation"), dict) else {}
         review = summary.get("review", {}) if isinstance(summary.get("review"), dict) else {}
+        agreement = summary.get("agreement", {}) if isinstance(summary.get("agreement"), dict) else {}
         approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
         active_learning = summary.get("active_learning", {}) if isinstance(summary.get("active_learning"), dict) else {}
         artifacts = summary.get("artifacts", {}) if isinstance(summary.get("artifacts"), dict) else {}
@@ -1748,6 +1822,7 @@ class ReportingService:
                     {"label": "Review guide", "path": review.get("review_queue_report_path"), "note": "Инструкция по HITL и объяснение следующего шага."},
                     {"label": "Review merge report", "path": review.get("review_merge_report_path"), "note": "Результат ручного merge и post-review status."},
                     {"label": "Active learning report", "path": active_learning.get("al_report_path"), "note": "История AL-итераций после review."},
+                    {"label": "Review agreement report", "path": agreement.get("agreement_report_path"), "note": "Auto-vs-human agreement and Cohen's kappa for the reviewed subset."},
                 ],
             },
             {
@@ -1757,6 +1832,7 @@ class ReportingService:
                     {"label": "Review queue context", "path": review.get("review_queue_context_path"), "note": "Машиночитаемый контекст для reviewer tooling."},
                     {"label": "Corrected queue CSV", "path": "data/interim/review_queue_corrected.csv", "note": "Заполняется человеком и подаётся обратно в pipeline.", "expected": True},
                     {"label": "Review merge context", "path": review.get("review_merge_context_path"), "note": "Итог merge в JSON-виде для проверки согласованности."},
+                    {"label": "Review agreement context", "path": agreement.get("agreement_context_path"), "note": "Machine-readable agreement metrics for the reviewed subset."},
                 ],
             },
             {

@@ -77,7 +77,32 @@ def test_eda_context_includes_extended_metrics(tmp_path: Path) -> None:
     assert payload["duplicate_summary"]["duplicate_rows"] == 0
     assert payload["rating_distribution"]["available"] is True
     assert payload["text_length_buckets"]["available"] is True
+    assert payload["cleaned_word_cloud"]["available"] is True
+    assert payload["cleaned_word_cloud"]["valid_text_rows"] == 2
+    assert payload["cleaned_word_cloud"]["terms"][0]["term"] == "energy"
     assert payload["quality_warnings"] == ["duplicates removed"]
+
+
+def test_eda_context_word_cloud_filters_stop_words_and_digits(tmp_path: Path) -> None:
+    """The cleaned word cloud should keep topical tokens and drop stop words or numeric noise."""
+
+    service = ReportingService(_make_context(tmp_path))
+    cleaned = _Frame(
+        [
+            {"id": "1", "source": "HF", "text": "The energy boost was 100 percent real", "rating": 5},
+            {"id": "2", "source": "Web", "text": "And the focus boost stayed clean", "rating": 4},
+        ]
+    )
+
+    context_path = service.write_eda_context(cleaned, raw_df_like=cleaned, quality_report={"warnings": []})
+    payload = json.loads((tmp_path / context_path).read_text(encoding="utf-8"))
+    terms = [item["term"] for item in payload["cleaned_word_cloud"]["terms"]]
+
+    assert "energy" in terms
+    assert "boost" in terms
+    assert "the" not in terms
+    assert "and" not in terms
+    assert "100" not in terms
 
 
 def test_eda_html_report_is_created(tmp_path: Path) -> None:
@@ -347,7 +372,22 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     service.registry.save_json("data/raw/approval_candidates.json", [{"source_id": "demo"}])
     service.registry.save_json("data/raw/discovered_sources.json", [{"source_id": "demo"}])
     service.registry.save_json("data/raw/online_governance_summary.json", {"github_auth_mode": "unauthenticated"})
-    service.registry.save_json("data/interim/eda_context.json", {"n_rows": 2})
+    service.registry.save_json(
+        "data/interim/eda_context.json",
+        {
+            "n_rows": 2,
+            "cleaned_word_cloud": {
+                "available": True,
+                "valid_text_rows": 2,
+                "token_count": 5,
+                "unique_terms": 4,
+                "terms": [
+                    {"term": "energy", "count": 2, "font_size": 36, "opacity": 1.0},
+                    {"term": "boost", "count": 1, "font_size": 20, "opacity": 0.68},
+                ],
+            },
+        },
+    )
     service.registry.save_json("data/interim/annotation_trace.json", {"llm_mode": "classify_effect"})
     service.registry.save_json("data/interim/model_metrics.json", {"accuracy": 1.0, "f1": 1.0})
     service.registry.save_text("data/interim/review_queue.csv", "id\n1\n")
@@ -440,6 +480,9 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     assert 'href="review_workspace.html"' in html
     assert 'href="online_governance_report.md"' in html
     assert "../data/interim/model_artifact.pkl" in html
+    assert "Cleaned word cloud" in html
+    assert "Text rows with tokens: 2. Tokens after cleaning: 5. Unique terms: 4." in html
+    assert "energy" in html
     assert "Corrected queue CSV" in html
     assert "expected input" in html
     assert "needs action" in html

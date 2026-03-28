@@ -127,6 +127,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "rating_distribution" in eda_context
     assert "text_length_summary" in eda_context
     assert "text_length_buckets" in eda_context
+    assert "cleaned_word_cloud" in eda_context
     assert "missing_values_summary" in eda_context
     assert "quality_warnings" in eda_context
     source_report = (tmp_path / "reports" / "source_report.md").read_text(encoding="utf-8")
@@ -149,6 +150,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "review_agreement_report.md" in dashboard_html
     assert "review_workspace.html" in dashboard_html
     assert "online_governance_report.md" in dashboard_html
+    assert "Cleaned word cloud" in dashboard_html
     assert "review_queue_report.md" in dashboard_html
     assert "review_queue_corrected.csv" in dashboard_html
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()

@@ -387,6 +387,8 @@ python run_pipeline.py --config configs/demo_minecraft.yaml
 - `reports/eda_report.html`
 - `reports/review_workspace.html` если нужен ручной HITL-review
 
+`reports/run_dashboard.html` now also includes a cleaned word cloud preview built from post-quality `text`, so the operator can quickly verify the topic focus before retrain.
+
 ### Основная CLI-команда
 
 ```bash

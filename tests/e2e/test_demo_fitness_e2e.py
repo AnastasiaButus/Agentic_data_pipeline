@@ -102,6 +102,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     eda_context = json.loads((tmp_path / "data" / "interim" / "eda_context.json").read_text(encoding="utf-8"))
     assert "n_rows" in eda_context
     assert "columns" in eda_context
+    assert "cleaned_word_cloud" in eda_context
     assert "missing_values_summary" in eda_context
     merge_report = (tmp_path / "reports" / "review_merge_report.md").read_text(encoding="utf-8")
     assert "Merge не выполнен" in merge_report
@@ -125,6 +126,7 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert "review_agreement_report.md" in dashboard_html
     assert "review_workspace.html" in dashboard_html
     assert "online_governance_report.md" in dashboard_html
+    assert "Cleaned word cloud" in dashboard_html
     assert "review_queue_corrected.csv" in dashboard_html
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert (tmp_path / "data" / "interim" / "model_metrics.json").exists()

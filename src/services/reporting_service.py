@@ -2,13 +2,115 @@
 
 from __future__ import annotations
 
+from collections import Counter
 import posixpath
+import re
 from pathlib import Path
 from typing import Any
 
 from src.core.context import PipelineContext
 from src.services.artifact_registry import ArtifactRegistry
 from src.services.source_compliance import COMPLIANCE_KEYS, build_candidate_compliance_metadata
+
+WORD_CLOUD_STOP_WORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "been",
+    "but",
+    "by",
+    "for",
+    "from",
+    "had",
+    "has",
+    "have",
+    "her",
+    "his",
+    "i",
+    "if",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "my",
+    "not",
+    "of",
+    "on",
+    "or",
+    "our",
+    "so",
+    "than",
+    "that",
+    "the",
+    "their",
+    "them",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "to",
+    "too",
+    "was",
+    "we",
+    "were",
+    "with",
+    "you",
+    "your",
+    "в",
+    "во",
+    "вот",
+    "для",
+    "до",
+    "его",
+    "ее",
+    "если",
+    "есть",
+    "еще",
+    "же",
+    "за",
+    "из",
+    "или",
+    "их",
+    "как",
+    "ко",
+    "к",
+    "ли",
+    "мы",
+    "на",
+    "над",
+    "не",
+    "но",
+    "о",
+    "об",
+    "он",
+    "она",
+    "они",
+    "оно",
+    "от",
+    "по",
+    "под",
+    "после",
+    "при",
+    "про",
+    "с",
+    "со",
+    "так",
+    "то",
+    "тоже",
+    "у",
+    "уже",
+    "что",
+    "это",
+    "эти",
+    "этот",
+    "я",
+}
 
 
 class ReportingService:
@@ -1267,6 +1369,7 @@ class ReportingService:
         agreement = summary.get("agreement", {}) if isinstance(summary.get("agreement"), dict) else {}
         approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
         training = summary.get("training", {}) if isinstance(summary.get("training"), dict) else {}
+        eda_context_payload = self._load_json_artifact(eda.get("eda_context_path"))
 
         dashboard_path = self._normalize_artifact_reference(dashboard.get("dashboard_path") or "reports/run_dashboard.html")
         final_report_path = self._normalize_artifact_reference(dashboard.get("final_report_path") or "final_report.md")
@@ -1366,6 +1469,11 @@ class ReportingService:
             "<ul>" + "".join(f"<li>{self._escape_html(item)}</li>" for item in warnings) + "</ul>"
             if warnings
             else '<p class="muted">Quality stage не вернул предупреждений.</p>'
+        )
+        word_cloud_html = self._render_dashboard_word_cloud(
+            eda_context_payload.get("cleaned_word_cloud", {})
+            if isinstance(eda_context_payload, dict)
+            else {}
         )
 
         next_step = self._normalize_text(dashboard.get("next_step")) or self._normalize_text(review.get("next_step")) or "inspect artifacts"
@@ -1530,6 +1638,28 @@ class ReportingService:
     .artifact-status.expected {{ background: var(--warm-soft); color: #9a5a03; }}
     .artifact-note, .muted {{ color: var(--muted); font-size: 0.92rem; line-height: 1.5; }}
     .artifact-path {{ margin-top: 6px; font-family: "Cascadia Mono", "Consolas", monospace; font-size: 0.8rem; color: var(--accent); word-break: break-all; }}
+    .word-cloud-shell {{ display: grid; gap: 14px; }}
+    .word-cloud-meta {{ color: var(--muted); font-size: 0.92rem; line-height: 1.5; }}
+    .word-cloud {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 14px;
+      align-items: flex-end;
+      padding: 6px 0 2px;
+    }}
+    .word-chip {{
+      display: inline-flex;
+      align-items: baseline;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(203, 229, 223, 0.60);
+      border: 1px solid rgba(31, 111, 120, 0.16);
+      color: var(--ink);
+      line-height: 1;
+    }}
+    .word-chip:nth-child(3n) {{ background: rgba(253, 231, 199, 0.72); border-color: rgba(217, 119, 6, 0.18); }}
+    .word-chip small {{ color: var(--muted); font-size: 0.72em; }}
     @keyframes rise {{ from {{ opacity: 0; transform: translateY(8px); }} to {{ opacity: 1; transform: translateY(0); }} }}
     @media (max-width: 900px) {{ .hero-grid, .layout {{ grid-template-columns: 1fr; }} }}
   </style>
@@ -1584,6 +1714,12 @@ class ReportingService:
         <h2>Quality and review signals</h2>
         {warnings_html}
       </div>
+    </section>
+
+    <section class="panel" style="margin-top: 20px;">
+      <h2>Cleaned word cloud</h2>
+      <p>Preview of the cleaned post-quality text after lowercasing, punctuation cleanup, and stop-word filtering. It helps quickly verify the current topic focus before HITL and retrain.</p>
+      {word_cloud_html}
     </section>
 
     <section class="panel" style="margin-top: 20px;">
@@ -1697,6 +1833,20 @@ class ReportingService:
             return self.registry.exists(normalized)
         except Exception:
             return False
+
+    def _load_json_artifact(self, value: Any) -> dict[str, Any]:
+        """Load a local JSON artifact when available and keep dashboard rendering resilient."""
+
+        normalized = self._normalize_artifact_reference(value)
+        if not normalized or "://" in normalized:
+            return {}
+
+        try:
+            payload = self.registry.load_json(normalized)
+        except Exception:
+            return {}
+
+        return payload if isinstance(payload, dict) else {}
 
     def _dashboard_href(self, dashboard_path: str, target_path: Any) -> str:
         """Build an HTML-friendly relative href from the dashboard to a local artifact."""
@@ -2011,6 +2161,7 @@ class ReportingService:
         summary["raw_vs_cleaned"] = self._build_raw_vs_cleaned_summary(raw_rows, rows)
         summary["rating_distribution"] = self._build_rating_distribution(rows, "rating", columns)
         summary["text_length_buckets"] = self._build_text_length_buckets(rows, "text", columns)
+        summary["cleaned_word_cloud"] = self._build_cleaned_word_cloud(rows, "text", columns)
         summary["quality_warnings"] = self._extract_quality_warnings(quality_report)
 
         notes = list(summary.get("notes", []))
@@ -2029,6 +2180,77 @@ class ReportingService:
 
         summary["notes"] = notes
         return summary
+
+    def _build_cleaned_word_cloud(
+        self,
+        rows: list[dict[str, Any]],
+        column_name: str,
+        available_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Build a compact word-cloud payload from cleaned text values."""
+
+        columns = available_columns if available_columns is not None else self._collect_columns(rows)
+        if column_name not in columns:
+            return {"available": False, "reason": "column_absent"}
+
+        if not rows:
+            return {"available": False, "reason": "no_text_values"}
+
+        token_counts: Counter[str] = Counter()
+        valid_text_rows = 0
+        for row in rows:
+            tokens = self._extract_word_cloud_tokens(row.get(column_name))
+            if not tokens:
+                continue
+            valid_text_rows += 1
+            token_counts.update(tokens)
+
+        if not token_counts:
+            return {"available": False, "reason": "no_terms_after_cleaning"}
+
+        top_terms = token_counts.most_common(18)
+        max_count = max(count for _, count in top_terms)
+        min_count = min(count for _, count in top_terms)
+        terms: list[dict[str, Any]] = []
+        for term, count in top_terms:
+            emphasis = 1.0 if max_count == min_count else (count - min_count) / (max_count - min_count)
+            terms.append(
+                {
+                    "term": term,
+                    "count": count,
+                    "font_size": 20 + round(emphasis * 16),
+                    "opacity": round(0.68 + emphasis * 0.32, 3),
+                }
+            )
+
+        return {
+            "available": True,
+            "column": column_name,
+            "valid_text_rows": valid_text_rows,
+            "token_count": sum(token_counts.values()),
+            "unique_terms": len(token_counts),
+            "terms": terms,
+        }
+
+    def _extract_word_cloud_tokens(self, value: Any) -> list[str]:
+        """Tokenize cleaned text for a lightweight word-cloud preview."""
+
+        if self._is_missing_value(value):
+            return []
+
+        text = self._normalize_text(value).lower()
+        raw_tokens = re.findall(r"[0-9A-Za-zА-Яа-яЁё][0-9A-Za-zА-Яа-яЁё'’_-]*", text)
+        tokens: list[str] = []
+        for raw_token in raw_tokens:
+            token = raw_token.strip("'’_-")
+            if len(token) < 3:
+                continue
+            if any(character.isdigit() for character in token):
+                continue
+            if token in WORD_CLOUD_STOP_WORDS:
+                continue
+            tokens.append(token)
+        return tokens
 
     def _build_duplicate_summary(
         self,
@@ -2348,7 +2570,62 @@ class ReportingService:
             return "числовые значения не найдены"
         if reason == "no_text_values":
             return "текстовые значения не найдены"
+        if reason == "no_terms_after_cleaning":
+            return "no tokens left after cleaning"
         return f"недоступно: {reason}"
+
+    def _render_dashboard_word_cloud(self, payload: dict[str, Any]) -> str:
+        """Render a lightweight cleaned word cloud for the dashboard."""
+
+        if not payload.get("available"):
+            return f'<p class="muted">{self._escape_html(self._describe_absence(payload or {}))}</p>'
+
+        terms = payload.get("terms", [])
+        if not isinstance(terms, list) or not terms:
+            return '<p class="muted">No cleaned tokens available for preview.</p>'
+
+        chips: list[str] = []
+        for term_payload in terms:
+            term = self._normalize_text(term_payload.get("term"))
+            if not term:
+                continue
+
+            try:
+                font_size = int(term_payload.get("font_size", 22))
+            except (TypeError, ValueError):
+                font_size = 22
+
+            try:
+                opacity = float(term_payload.get("opacity", 0.82))
+            except (TypeError, ValueError):
+                opacity = 0.82
+
+            chips.append(
+                '<span class="word-chip" style="font-size: {font_size}px; opacity: {opacity};">'
+                '<span>{term}</span><small>{count}</small></span>'.format(
+                    font_size=max(18, min(font_size, 42)),
+                    opacity=max(0.55, min(opacity, 1.0)),
+                    term=self._escape_html(term),
+                    count=self._escape_html(term_payload.get("count")),
+                )
+            )
+
+        if not chips:
+            return '<p class="muted">No cleaned tokens available for preview.</p>'
+
+        meta = (
+            "Text rows with tokens: {rows}. Tokens after cleaning: {tokens}. Unique terms: {unique}.".format(
+                rows=self._format_numeric(payload.get("valid_text_rows", 0)),
+                tokens=self._format_numeric(payload.get("token_count", 0)),
+                unique=self._format_numeric(payload.get("unique_terms", 0)),
+            )
+        )
+        return (
+            '<div class="word-cloud-shell">'
+            f'<div class="word-cloud-meta">{self._escape_html(meta)}</div>'
+            f'<div class="word-cloud">{"".join(chips)}</div>'
+            "</div>"
+        )
 
     def _html_metric_block(self, title: str, body: str) -> str:
         """Render one HTML metric section for the EDA dashboard."""

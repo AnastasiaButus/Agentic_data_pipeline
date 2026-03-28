@@ -1260,6 +1260,57 @@ class ReportingService:
         self.registry.save_json(path, summary)
         return str(path)
 
+    def write_training_comparison_report(self, summary: dict[str, Any]) -> str:
+        """Write a human-facing comparison between baseline auto-label training and reviewed retrain."""
+
+        lines = [
+            "# Training comparison report",
+            "",
+            f"- comparison_scope: {self._normalize_text(summary.get('comparison_scope'))}",
+            f"- baseline_status: {self._normalize_text(summary.get('baseline_status'))}",
+            f"- reviewed_status: {self._normalize_text(summary.get('reviewed_status'))}",
+            f"- review_status: {self._normalize_text(summary.get('review_status'))}",
+            f"- corrected_queue_found: {summary.get('corrected_queue_found')}",
+            f"- n_effect_label_changes: {self._format_numeric(summary.get('n_effect_label_changes'))}",
+            f"- datasets_identical: {summary.get('datasets_identical')}",
+            f"- delta_accuracy: {self._format_numeric(summary.get('delta_accuracy')) if summary.get('delta_accuracy') is not None else 'n/a'}",
+            f"- delta_f1: {self._format_numeric(summary.get('delta_f1')) if summary.get('delta_f1') is not None else 'n/a'}",
+            "",
+            "## Baseline metrics",
+        ]
+
+        baseline_metrics = summary.get("baseline_metrics", {}) if isinstance(summary.get("baseline_metrics"), dict) else {}
+        reviewed_metrics = summary.get("reviewed_metrics", {}) if isinstance(summary.get("reviewed_metrics"), dict) else {}
+        if baseline_metrics:
+            for key, value in baseline_metrics.items():
+                lines.append(f"- {key}: {self._format_numeric(value) if isinstance(value, (int, float)) else value}")
+        else:
+            lines.append("- baseline metrics unavailable")
+
+        lines.extend(["", "## Reviewed retrain metrics"])
+        if reviewed_metrics:
+            for key, value in reviewed_metrics.items():
+                lines.append(f"- {key}: {self._format_numeric(value) if isinstance(value, (int, float)) else value}")
+        else:
+            lines.append("- reviewed retrain metrics unavailable")
+
+        notes = summary.get("notes", []) if isinstance(summary.get("notes"), list) else []
+        if notes:
+            lines.extend(["", "## Notes"])
+            for note in notes:
+                lines.append(f"- {self._normalize_text(note)}")
+
+        path = "reports/training_comparison_report.md"
+        self.registry.save_markdown(path, "\n".join(lines).strip() + "\n")
+        return path
+
+    def write_training_comparison_context(self, summary: dict[str, Any]) -> str:
+        """Write the machine-readable training comparison summary."""
+
+        path = Path("data/interim/training_comparison.json")
+        self.registry.save_json(path, summary)
+        return str(path)
+
     def write_final_report(self, summary: dict[str, Any]) -> str:
         """Write the final end-to-end markdown report for the demo pipeline."""
 
@@ -1276,10 +1327,11 @@ class ReportingService:
             "agreement": "Agreement",
             "approval": "Approval",
             "active_learning": "Active Learning",
+            "training_comparison": "Training Comparison",
             "training": "Training",
             "artifacts": "Artifacts",
         }
-        for section_name in ["runtime", "dashboard", "sources", "online_governance", "quality", "eda", "annotation", "review", "agreement", "approval", "active_learning", "training", "artifacts"]:
+        for section_name in ["runtime", "dashboard", "sources", "online_governance", "quality", "eda", "annotation", "review", "agreement", "approval", "active_learning", "training_comparison", "training", "artifacts"]:
             section = summary.get(section_name)
             lines.append(f"## {section_titles[section_name]}")
             lines.append("")
@@ -1368,6 +1420,7 @@ class ReportingService:
         review = summary.get("review", {}) if isinstance(summary.get("review"), dict) else {}
         agreement = summary.get("agreement", {}) if isinstance(summary.get("agreement"), dict) else {}
         approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
+        training_comparison = summary.get("training_comparison", {}) if isinstance(summary.get("training_comparison"), dict) else {}
         training = summary.get("training", {}) if isinstance(summary.get("training"), dict) else {}
         eda_context_payload = self._load_json_artifact(eda.get("eda_context_path"))
 
@@ -1436,6 +1489,11 @@ class ReportingService:
                 "label": "Open agreement report",
                 "path": agreement.get("agreement_report_path"),
                 "description": "Auto-vs-human agreement and Cohen's kappa on the reviewed subset.",
+            },
+            {
+                "label": "Open training comparison",
+                "path": training_comparison.get("comparison_report_path"),
+                "description": "Baseline auto-label metrics versus the reviewed retrain on the same local TF-IDF + LogReg stack.",
             },
             {
                 "label": "Open source shortlist",
@@ -1956,6 +2014,7 @@ class ReportingService:
         agreement = summary.get("agreement", {}) if isinstance(summary.get("agreement"), dict) else {}
         approval = summary.get("approval", {}) if isinstance(summary.get("approval"), dict) else {}
         active_learning = summary.get("active_learning", {}) if isinstance(summary.get("active_learning"), dict) else {}
+        training_comparison = summary.get("training_comparison", {}) if isinstance(summary.get("training_comparison"), dict) else {}
         artifacts = summary.get("artifacts", {}) if isinstance(summary.get("artifacts"), dict) else {}
 
         return [
@@ -1973,6 +2032,7 @@ class ReportingService:
                     {"label": "Review merge report", "path": review.get("review_merge_report_path"), "note": "Результат ручного merge и post-review status."},
                     {"label": "Active learning report", "path": active_learning.get("al_report_path"), "note": "История AL-итераций после review."},
                     {"label": "Review agreement report", "path": agreement.get("agreement_report_path"), "note": "Auto-vs-human agreement and Cohen's kappa for the reviewed subset."},
+                    {"label": "Training comparison report", "path": training_comparison.get("comparison_report_path"), "note": "Сравнение baseline auto-label metrics и retrain после review/HITL."},
                 ],
             },
             {
@@ -1999,6 +2059,7 @@ class ReportingService:
                 "items": [
                     {"label": "EDA context", "path": eda.get("eda_context_path"), "note": "JSON summary для EDA/HITL layer."},
                     {"label": "Annotation trace context", "path": annotation.get("annotation_trace_context_path"), "note": "JSON trace annotation contract."},
+                    {"label": "Training comparison context", "path": training_comparison.get("comparison_context_path"), "note": "Machine-readable baseline-vs-reviewed retrain summary."},
                     {"label": "Model metrics", "path": artifacts.get("metrics_path"), "note": "Финальные метрики baseline-модели."},
                     {"label": "Model artifact", "path": artifacts.get("model_path"), "note": "Сериализованный классификатор TF-IDF + LogReg."},
                     {"label": "Vectorizer artifact", "path": artifacts.get("vectorizer_path"), "note": "Сериализованный TF-IDF vectorizer."},

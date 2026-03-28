@@ -210,6 +210,39 @@ def test_review_agreement_report_and_context_are_created(tmp_path: Path) -> None
     assert context["kappa_status"] == "computed"
 
 
+def test_training_comparison_report_and_context_are_created(tmp_path: Path) -> None:
+    """Training comparison should produce both markdown and machine-readable artifacts."""
+
+    service = ReportingService(_make_context(tmp_path))
+    summary = {
+        "comparison_scope": "auto_labeled_baseline_vs_reviewed_retrain",
+        "baseline_status": "computed",
+        "reviewed_status": "computed",
+        "review_status": "merged",
+        "corrected_queue_found": True,
+        "n_effect_label_changes": 2,
+        "datasets_identical": False,
+        "delta_accuracy": 0.1,
+        "delta_f1": 0.08,
+        "baseline_metrics": {"accuracy": 0.7, "f1": 0.68, "n_examples": 12},
+        "reviewed_metrics": {"accuracy": 0.8, "f1": 0.76, "n_examples": 12},
+        "notes": ["Reviewed retrain includes manual effect-label changes from HITL."],
+    }
+
+    report_path = service.write_training_comparison_report(summary)
+    context_path = service.write_training_comparison_context(summary)
+
+    report = (tmp_path / report_path).read_text(encoding="utf-8")
+    context = json.loads((tmp_path / context_path).read_text(encoding="utf-8"))
+
+    assert "Training comparison report" in report
+    assert "comparison_scope: auto_labeled_baseline_vs_reviewed_retrain" in report
+    assert "delta_accuracy: 0.1" in report
+    assert "delta_f1: 0.08" in report
+    assert "## Reviewed retrain metrics" in report
+    assert context["review_status"] == "merged"
+
+
 def test_source_report_and_approval_candidates_include_compliance_fields(tmp_path: Path) -> None:
     """Approval-facing source artifacts should surface license and robots metadata explicitly."""
 
@@ -362,6 +395,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     service.registry.save_markdown("reports/source_report.md", "# Source Report\n")
     service.registry.save_markdown("reports/online_governance_report.md", "# Online Governance\n")
     service.registry.save_markdown("reports/review_agreement_report.md", "# Agreement\n")
+    service.registry.save_markdown("reports/training_comparison_report.md", "# Training Comparison\n")
     service.registry.save_text("reports/review_workspace.html", "<html><body>Review Workspace</body></html>")
     service.registry.save_text("reports/eda_report.html", "<html><body>EDA</body></html>")
     service.registry.save_markdown("reports/review_queue_report.md", "# Review Queue\n")
@@ -456,6 +490,17 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
             "kappa": None,
             "kappa_status": "not_available_no_compared_rows",
         },
+        "training_comparison": {
+            "comparison_report_path": "reports/training_comparison_report.md",
+            "comparison_context_path": "data/interim/training_comparison.json",
+            "comparison_scope": "auto_labeled_baseline_vs_reviewed_retrain",
+            "baseline_status": "computed",
+            "reviewed_status": "computed",
+            "datasets_identical": False,
+            "delta_accuracy": 0.05,
+            "delta_f1": 0.04,
+            "n_effect_label_changes": 1,
+        },
         "approval": {
             "approved_sources_path": "data/raw/approved_sources.json",
             "approval_status": "skipped_missing_file",
@@ -477,6 +522,7 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     assert 'href="../final_report.md"' in html
     assert 'href="eda_report.html"' in html
     assert 'href="review_agreement_report.md"' in html
+    assert 'href="training_comparison_report.md"' in html
     assert 'href="review_workspace.html"' in html
     assert 'href="online_governance_report.md"' in html
     assert "../data/interim/model_artifact.pkl" in html

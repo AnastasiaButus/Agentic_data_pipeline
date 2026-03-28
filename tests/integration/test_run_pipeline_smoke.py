@@ -56,6 +56,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "## EDA" in final_report
     assert "## Annotation" in final_report
     assert "## Agreement" in final_report
+    assert "## Training Comparison" in final_report
     assert "eda_report_path" in final_report
     assert "eda_html_report_path" in final_report
     assert "eda_context_path" in final_report
@@ -66,6 +67,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "github_auth_mode: not_used" in final_report
     assert "review_workspace_path: reports/review_workspace.html" in final_report
     assert "agreement_report_path: reports/review_agreement_report.md" in final_report
+    assert "comparison_report_path: reports/training_comparison_report.md" in final_report
     assert "review_required:" in final_report
     assert "next_step:" in final_report
     approval_candidates = json.loads((tmp_path / "data" / "raw" / "approval_candidates.json").read_text(encoding="utf-8"))
@@ -87,10 +89,15 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "reviewed_effect_label" in review_workspace
     agreement_report = (tmp_path / "reports" / "review_agreement_report.md").read_text(encoding="utf-8")
     agreement_context = json.loads((tmp_path / "data" / "interim" / "review_agreement_context.json").read_text(encoding="utf-8"))
+    training_comparison_report = (tmp_path / "reports" / "training_comparison_report.md").read_text(encoding="utf-8")
+    training_comparison_context = json.loads((tmp_path / "data" / "interim" / "training_comparison.json").read_text(encoding="utf-8"))
     assert "Review agreement report" in agreement_report
     assert "compared_rows: 0" in agreement_report
     assert agreement_context["compared_rows"] == 0
     assert agreement_context["kappa_status"] == "not_available_no_compared_rows"
+    assert "Training comparison report" in training_comparison_report
+    assert training_comparison_context["comparison_scope"] == "auto_labeled_baseline_vs_reviewed_retrain"
+    assert training_comparison_context["datasets_identical"] is True
     review_queue_context = json.loads((tmp_path / "data" / "interim" / "review_queue_context.json").read_text(encoding="utf-8"))
     assert review_queue_context["confidence_threshold"] == loaded_config.annotation.confidence_threshold
     assert review_queue_context["n_rows"] >= 0
@@ -148,6 +155,7 @@ def test_run_pipeline_smoke_creates_final_report_and_metrics(monkeypatch, tmp_pa
     assert "effective_mode: offline_demo" in dashboard_html
     assert "../final_report.md" in dashboard_html
     assert "review_agreement_report.md" in dashboard_html
+    assert "training_comparison_report.md" in dashboard_html
     assert "review_workspace.html" in dashboard_html
     assert "online_governance_report.md" in dashboard_html
     assert "Cleaned word cloud" in dashboard_html

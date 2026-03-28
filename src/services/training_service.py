@@ -30,21 +30,87 @@ class TrainingService:
         self.registry = registry if registry is not None else ArtifactRegistry(ctx)
         self.random_state = random_state if random_state is not None else getattr(ctx.config.project, "seed", 42)
 
-    def train(self, df: Any) -> tuple[dict[str, str], dict[str, float]]:
+    def train(self, df: Any) -> tuple[dict[str, str], dict[str, float | int]]:
         """Train TF-IDF plus LogisticRegression and persist the model artifacts and metrics."""
 
-        records = self._filter_records(self._to_records(df))
-        if not records:
+        model, vectorizer, metrics = self._train_once(self._to_records(df))
+        artifacts = self._save_artifacts(model, vectorizer, metrics)
+        return artifacts, metrics
+
+    def compare_baseline_and_reviewed(self, baseline_df: Any, reviewed_df: Any) -> dict[str, Any]:
+        """Compare auto-labeled baseline metrics against a post-review retrain on the same ML baseline."""
+
+        baseline_records = self._to_records(baseline_df)
+        reviewed_records = self._to_records(reviewed_df)
+        baseline_filtered = self._filter_records(baseline_records)
+        reviewed_filtered = self._filter_records(reviewed_records)
+
+        summary: dict[str, Any] = {
+            "comparison_scope": "auto_labeled_baseline_vs_reviewed_retrain",
+            "baseline_rows": len(baseline_records),
+            "reviewed_rows": len(reviewed_records),
+            "baseline_effective_rows": len(baseline_filtered),
+            "reviewed_effective_rows": len(reviewed_filtered),
+            "datasets_identical": self._records_signature(baseline_filtered) == self._records_signature(reviewed_filtered),
+            "baseline_status": "not_started",
+            "reviewed_status": "not_started",
+            "baseline_metrics": {},
+            "reviewed_metrics": {},
+            "delta_accuracy": None,
+            "delta_f1": None,
+            "notes": [],
+        }
+
+        for dataset_name, records in [("baseline", baseline_records), ("reviewed", reviewed_records)]:
+            try:
+                _model, _vectorizer, metrics = self._train_once(records)
+            except ValidationError as exc:
+                summary[f"{dataset_name}_status"] = "not_available_validation_error"
+                summary[f"{dataset_name}_error"] = str(exc)
+                continue
+
+            summary[f"{dataset_name}_status"] = "computed"
+            summary[f"{dataset_name}_metrics"] = metrics
+
+        if summary["baseline_status"] == "computed" and summary["reviewed_status"] == "computed":
+            baseline_metrics = summary["baseline_metrics"]
+            reviewed_metrics = summary["reviewed_metrics"]
+            summary["delta_accuracy"] = reviewed_metrics["accuracy"] - baseline_metrics["accuracy"]
+            summary["delta_f1"] = reviewed_metrics["f1"] - baseline_metrics["f1"]
+
+        notes: list[str] = []
+        if summary["datasets_identical"]:
+            notes.append("Baseline and reviewed datasets are identical in this run, so retrain deltas should stay close to zero.")
+        else:
+            notes.append("Reviewed retrain uses the post-review dataset, so metric deltas reflect HITL changes instead of only the original auto-labels.")
+
+        for dataset_name in ["baseline", "reviewed"]:
+            status = summary.get(f"{dataset_name}_status")
+            if status != "computed":
+                notes.append(
+                    "{name} metrics are unavailable: {reason}".format(
+                        name=dataset_name,
+                        reason=self._normalize_text(summary.get(f"{dataset_name}_error")) or status,
+                    )
+                )
+
+        summary["notes"] = notes
+        return summary
+
+    def _train_once(self, records: list[dict[str, Any]]) -> tuple[Any, Any, dict[str, float | int]]:
+        """Fit the baseline model once and return both artifacts and metrics without persisting them."""
+
+        filtered_records = self._filter_records(records)
+        if not filtered_records:
             raise ValidationError("Training requires non-empty data with text and effect_label")
 
-        labels = [self._normalize_text(row.get("effect_label")) for row in records]
+        labels = [self._normalize_text(row.get("effect_label")) for row in filtered_records]
         if not any(labels):
             raise ValidationError("Training requires effect_label values after filtering")
         if len(set(label for label in labels if label)) < 2:
             raise ValidationError("Training requires at least two effect_label classes")
 
-        train_records, valid_records, test_records = self._split_records(records)
-
+        train_records, valid_records, test_records = self._split_records(filtered_records)
         if not train_records:
             raise ValidationError("Training split is empty")
 
@@ -66,9 +132,13 @@ class TrainingService:
         metrics = {
             "accuracy": compute_accuracy(evaluation_targets, predictions),
             "f1": compute_macro_f1(evaluation_targets, predictions),
+            "n_examples": len(filtered_records),
+            "train_size": len(train_records),
+            "validation_size": len(valid_records),
+            "test_size": len(test_records),
+            "evaluation_size": len(evaluation_records),
         }
-        artifacts = self._save_artifacts(model, vectorizer_fit, metrics)
-        return artifacts, metrics
+        return model, vectorizer_fit, metrics
 
     def _split_records(self, records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
         """Split records into train/validation/test using a stratified path when possible."""
@@ -131,7 +201,7 @@ class TrainingService:
         test = remaining[validation_size:]
         return train, validation, test
 
-    def _save_artifacts(self, model: Any, vectorizer: Any, metrics: dict[str, float]) -> dict[str, str]:
+    def _save_artifacts(self, model: Any, vectorizer: Any, metrics: dict[str, float | int]) -> dict[str, str]:
         """Persist the model, vectorizer, and metrics to project-relative artifacts."""
 
         model_path = self._artifact_path("data/interim/model_artifact.pkl")
@@ -214,3 +284,16 @@ class TrainingService:
                 continue
             counts[label] = counts.get(label, 0) + 1
         return min(counts.values()) if counts else 0
+
+    def _records_signature(self, records: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
+        """Build a stable signature for comparison between baseline and reviewed training inputs."""
+
+        signature = [
+            (
+                self._record_id(row),
+                self._normalize_text(row.get("text")),
+                self._normalize_text(row.get("effect_label")),
+            )
+            for row in records
+        ]
+        return sorted(signature)

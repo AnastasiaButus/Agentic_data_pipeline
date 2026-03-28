@@ -117,3 +117,54 @@ def test_training_service_uses_fallback_split_on_small_dataset(tmp_path: Path) -
 
     assert {"accuracy", "f1"}.issubset(metrics.keys())
     assert Path(artifacts["metrics_path"]).exists()
+
+
+def test_training_service_compares_baseline_and_reviewed_retrain(tmp_path: Path) -> None:
+    """Comparison helper should report baseline/reviewed metrics and metric deltas."""
+
+    service = TrainingService(_make_context(tmp_path))
+    baseline = _training_rows()
+    reviewed = _training_rows()
+
+    summary = service.compare_baseline_and_reviewed(baseline, reviewed)
+
+    assert summary["comparison_scope"] == "auto_labeled_baseline_vs_reviewed_retrain"
+    assert summary["baseline_status"] == "computed"
+    assert summary["reviewed_status"] == "computed"
+    assert summary["datasets_identical"] is True
+    assert summary["baseline_metrics"]["n_examples"] == 30
+    assert summary["reviewed_metrics"]["n_examples"] == 30
+    assert summary["delta_accuracy"] == 0.0
+    assert summary["delta_f1"] == 0.0
+
+
+def test_training_service_comparison_reports_validation_failure_for_invalid_reviewed_dataset(tmp_path: Path) -> None:
+    """Comparison helper should keep baseline metrics and explain why reviewed retrain is unavailable."""
+
+    service = TrainingService(_make_context(tmp_path))
+    baseline = _training_rows()
+    reviewed = _Frame(
+        [
+            {
+                "id": "1",
+                "source": "HF",
+                "text": "Only one class remains here",
+                "label": None,
+                "rating": 5,
+                "created_at": "now",
+                "split": None,
+                "meta_json": "{}",
+                "sentiment_label": None,
+                "effect_label": "energy",
+                "confidence": 1.0,
+            }
+        ]
+    )
+
+    summary = service.compare_baseline_and_reviewed(baseline, reviewed)
+
+    assert summary["baseline_status"] == "computed"
+    assert summary["reviewed_status"] == "not_available_validation_error"
+    assert summary["delta_accuracy"] is None
+    assert summary["delta_f1"] is None
+    assert "at least two effect_label classes" in summary["reviewed_error"]

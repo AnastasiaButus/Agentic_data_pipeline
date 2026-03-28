@@ -172,6 +172,16 @@ class PipelineController:
         review_agreement_summary = build_review_agreement_summary(annotated, corrected_queue)
         review_agreement_report_path = self.reporting_service.write_review_agreement_report(review_agreement_summary)
         review_agreement_context_path = self.reporting_service.write_review_agreement_context(review_agreement_summary)
+        training_comparison_summary = self._build_training_comparison_summary(
+            annotated,
+            reviewed,
+            review_status=review_status,
+            review_required=review_required,
+            corrected_queue_found=review_merge_summary["corrected_queue_found"],
+            n_effect_label_changes=review_merge_summary["n_effect_label_changes"],
+        )
+        training_comparison_report_path = self.reporting_service.write_training_comparison_report(training_comparison_summary)
+        training_comparison_context_path = self.reporting_service.write_training_comparison_context(training_comparison_summary)
 
         reviewed_rows = self._to_records(reviewed)
         al_seed_size = max(1, min(50, len(reviewed_rows) // 2 if len(reviewed_rows) > 1 else 1))
@@ -274,6 +284,17 @@ class PipelineController:
                 "al_report_path": al_report_path,
                 "history": al_history,
             },
+            "training_comparison": {
+                "comparison_report_path": training_comparison_report_path,
+                "comparison_context_path": training_comparison_context_path,
+                "comparison_scope": training_comparison_summary.get("comparison_scope"),
+                "baseline_status": training_comparison_summary.get("baseline_status"),
+                "reviewed_status": training_comparison_summary.get("reviewed_status"),
+                "datasets_identical": training_comparison_summary.get("datasets_identical"),
+                "delta_accuracy": training_comparison_summary.get("delta_accuracy"),
+                "delta_f1": training_comparison_summary.get("delta_f1"),
+                "n_effect_label_changes": training_comparison_summary.get("n_effect_label_changes"),
+            },
             "training": training_metrics,
             "artifacts": artifacts,
         }
@@ -341,6 +362,8 @@ class PipelineController:
                 "review_agreement_report": review_agreement_report_path,
                 "review_agreement_context": review_agreement_context_path,
                 "al_report": al_report_path,
+                "training_comparison_report": training_comparison_report_path,
+                "training_comparison_context": training_comparison_context_path,
                 "dashboard": dashboard_path,
                 "final_report": final_report_path,
             },
@@ -484,3 +507,52 @@ class PipelineController:
         if value is None:
             return ""
         return str(value).strip()
+
+    def _build_training_comparison_summary(
+        self,
+        annotated: Any,
+        reviewed: Any,
+        *,
+        review_status: str,
+        review_required: bool,
+        corrected_queue_found: bool,
+        n_effect_label_changes: int,
+    ) -> dict[str, Any]:
+        """Build a resilient baseline-vs-reviewed training comparison summary."""
+
+        compare_helper = getattr(self.training_service, "compare_baseline_and_reviewed", None)
+        if callable(compare_helper):
+            summary = compare_helper(annotated, reviewed)
+        else:
+            summary = {
+                "comparison_scope": "auto_labeled_baseline_vs_reviewed_retrain",
+                "baseline_rows": len(self._to_records(annotated)),
+                "reviewed_rows": len(self._to_records(reviewed)),
+                "baseline_effective_rows": len(self._to_records(annotated)),
+                "reviewed_effective_rows": len(self._to_records(reviewed)),
+                "datasets_identical": self._to_records(annotated) == self._to_records(reviewed),
+                "baseline_status": "not_available_missing_compare_helper",
+                "reviewed_status": "not_available_missing_compare_helper",
+                "baseline_metrics": {},
+                "reviewed_metrics": {},
+                "delta_accuracy": None,
+                "delta_f1": None,
+                "notes": [
+                    "Training comparison helper is unavailable for the injected training service, so only the final training metrics are reported.",
+                ],
+            }
+
+        notes = list(summary.get("notes", [])) if isinstance(summary.get("notes"), list) else []
+        if review_required and not corrected_queue_found:
+            notes.append("Corrected queue was not loaded in this run, so reviewed retrain still reflects the current auto-labeled dataset.")
+        elif review_status == "merged_no_changes":
+            notes.append("Corrected queue was merged, but effect labels did not change, so retrain deltas may stay close to zero.")
+        elif review_status == "merged" and n_effect_label_changes > 0:
+            notes.append("Reviewed retrain includes manual effect-label changes from HITL, so deltas show the impact of post-review supervision.")
+
+        summary["notes"] = notes
+        summary["review_status"] = review_status
+        summary["review_required"] = review_required
+        summary["corrected_queue_found"] = corrected_queue_found
+        summary["n_effect_label_changes"] = n_effect_label_changes
+        return summary

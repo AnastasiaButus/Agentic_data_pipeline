@@ -457,7 +457,18 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
             },
         },
     )
-    service.registry.save_json("data/interim/annotation_trace.json", {"llm_mode": "classify_effect"})
+    service.registry.save_json(
+        "data/interim/annotation_trace.json",
+        {
+            "llm_mode": "classify_effect",
+            "prompt_contract": {"effect_labels": ["energy", "side_effects", "other"]},
+            "parser_contract": {
+                "parse_status_counts": {"parsed": 2},
+                "fallback_reason_counts": {},
+            },
+            "n_fallback_rows": 0,
+        },
+    )
     service.registry.save_json("data/interim/model_metrics.json", {"accuracy": 1.0, "f1": 1.0})
     service.registry.save_text("data/interim/review_queue.csv", "id\n1\n")
 
@@ -504,6 +515,14 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
             "annotation_trace_context_path": "data/interim/annotation_trace.json",
             "confidence_threshold": 0.6,
             "n_low_confidence": 1,
+            "use_llm_requested": True,
+            "requested_provider": "mock",
+            "resolved_provider": "mock",
+            "provider_status": "offline_mock_llm_active",
+            "llm_mode": "classify_effect",
+            "n_fallback_rows": 0,
+            "effect_labels": ["energy", "side_effects", "other"],
+            "fallback_reason_counts": {},
         },
         "review": {
             "status": "skipped_missing_corrected_queue",
@@ -567,6 +586,10 @@ def test_run_dashboard_collects_operator_links_and_relative_paths(tmp_path: Path
     assert 'href="online_governance_report.md"' in html
     assert "../data/interim/model_artifact.pkl" in html
     assert "Cleaned word cloud" in html
+    assert "HITL control center" in html
+    assert "LLM annotation center" in html
+    assert "offline_mock_llm_active" in html
+    assert "Open annotation trace" in html
     assert "Text rows with tokens: 2. Tokens after cleaning: 5. Unique terms: 4." in html
     assert "energy" in html
     assert "Corrected queue CSV" in html

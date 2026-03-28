@@ -126,6 +126,7 @@ class PipelineController:
         # Export the reviewer queue before consuming corrected labels so HITL semantics stay consistent.
         review_threshold = self._resolve_review_threshold(annotation_summary)
         label_options = self._resolve_review_label_options()
+        annotation_llm_summary = self._build_annotation_llm_summary(annotation_trace, label_options)
         review_queue = self.review_queue_service.export_low_confidence_queue(annotated, threshold=review_threshold)
         review_queue_report_path = self.reporting_service.write_review_queue_report(review_queue, review_threshold, label_options)
         review_queue_context_path = self.reporting_service.write_review_queue_context(review_queue, review_threshold, label_options)
@@ -262,6 +263,14 @@ class PipelineController:
                 "annotation_trace_context_path": annotation_trace_context_path,
                 "confidence_threshold": annotation_summary.get("confidence_threshold"),
                 "n_low_confidence": annotation_summary.get("n_low_confidence"),
+                "use_llm_requested": annotation_llm_summary.get("use_llm_requested"),
+                "requested_provider": annotation_llm_summary.get("requested_provider"),
+                "resolved_provider": annotation_llm_summary.get("resolved_provider"),
+                "provider_status": annotation_llm_summary.get("provider_status"),
+                "llm_mode": annotation_llm_summary.get("llm_mode"),
+                "n_fallback_rows": annotation_llm_summary.get("n_fallback_rows"),
+                "effect_labels": annotation_llm_summary.get("effect_labels"),
+                "fallback_reason_counts": annotation_llm_summary.get("fallback_reason_counts"),
             },
             "review": {
                 "status": review_status,
@@ -452,6 +461,79 @@ class PipelineController:
 
         cleaned = [str(label).strip() for label in label_options if str(label).strip()]
         return cleaned or ["energy", "side_effects", "other"]
+
+    def _build_annotation_llm_summary(
+        self,
+        annotation_trace: dict[str, Any],
+        label_options: list[str],
+    ) -> dict[str, Any]:
+        """Summarize how annotation currently uses LLM-assisted versus fallback paths."""
+
+        annotation_config = getattr(self.ctx.config, "annotation", None)
+        use_llm_requested = bool(getattr(annotation_config, "use_llm", False))
+        requested_provider = self._normalize_optional_provider(getattr(annotation_config, "llm_provider", ""))
+        llm_client = getattr(self.annotation_agent, "llm_client", None)
+        resolved_provider = self._resolve_annotation_provider_name(llm_client)
+
+        if not use_llm_requested:
+            provider_status = "disabled_in_config"
+        elif requested_provider == "gemini" and resolved_provider == "gemini":
+            provider_status = "gemini_active"
+        elif requested_provider == "gemini" and resolved_provider == "mock":
+            provider_status = "gemini_requested_but_mock_fallback_active"
+        elif resolved_provider == "mock":
+            provider_status = "offline_mock_llm_active"
+        elif resolved_provider == "disabled":
+            provider_status = "disabled"
+        else:
+            provider_status = f"{resolved_provider}_active"
+
+        prompt_contract = (
+            annotation_trace.get("prompt_contract", {})
+            if isinstance(annotation_trace.get("prompt_contract"), dict)
+            else {}
+        )
+        parser_contract = (
+            annotation_trace.get("parser_contract", {})
+            if isinstance(annotation_trace.get("parser_contract"), dict)
+            else {}
+        )
+        effect_labels = prompt_contract.get("effect_labels", label_options)
+        if not isinstance(effect_labels, list):
+            effect_labels = list(label_options)
+        fallback_reason_counts = parser_contract.get("fallback_reason_counts", {})
+        if not isinstance(fallback_reason_counts, dict):
+            fallback_reason_counts = {}
+
+        return {
+            "use_llm_requested": use_llm_requested,
+            "requested_provider": requested_provider,
+            "resolved_provider": resolved_provider,
+            "provider_status": provider_status,
+            "llm_mode": self._normalize_optional_provider(annotation_trace.get("llm_mode")),
+            "n_fallback_rows": int(annotation_trace.get("n_fallback_rows", 0) or 0),
+            "effect_labels": [str(label).strip() for label in effect_labels if str(label).strip()],
+            "fallback_reason_counts": {str(key): int(value) for key, value in fallback_reason_counts.items()},
+        }
+
+    def _resolve_annotation_provider_name(self, llm_client: Any) -> str:
+        """Map the active annotation client to a small stable provider name for reporting."""
+
+        if llm_client is None:
+            return "disabled"
+
+        provider_name = llm_client.__class__.__name__.strip().lower()
+        if provider_name == "mockllm":
+            return "mock"
+        if provider_name == "geminiclient":
+            return "gemini"
+        return provider_name or "unknown"
+
+    def _normalize_optional_provider(self, value: Any) -> str:
+        """Normalize provider-like values while keeping blanks explicit."""
+
+        normalized = self._normalize_text(value).lower().replace(" ", "_").replace("-", "_")
+        return normalized or "disabled"
 
     def _build_review_merge_summary(
         self,

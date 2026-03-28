@@ -137,6 +137,9 @@ def test_demo_fitness_e2e_pipeline_runs_and_produces_reports(monkeypatch, tmp_pa
     assert "review_workspace.html" in dashboard_html
     assert "online_governance_report.md" in dashboard_html
     assert "Cleaned word cloud" in dashboard_html
+    assert "HITL control center" in dashboard_html
+    assert "LLM annotation center" in dashboard_html
+    assert "offline_mock_llm_active" in dashboard_html
     assert "review_queue_corrected.csv" in dashboard_html
     assert (tmp_path / "data" / "interim" / "review_queue.csv").exists()
     assert (tmp_path / "data" / "interim" / "model_metrics.json").exists()

@@ -1475,6 +1475,11 @@ class ReportingService:
         training_comparison = summary.get("training_comparison", {}) if isinstance(summary.get("training_comparison"), dict) else {}
         training = summary.get("training", {}) if isinstance(summary.get("training"), dict) else {}
         eda_context_payload = self._load_json_artifact(eda.get("eda_context_path"))
+        annotation_trace_payload = self._load_json_artifact(annotation.get("annotation_trace_context_path"))
+        review_queue_context_payload = self._load_json_artifact(review.get("review_queue_context_path"))
+        review_queue_preview_rows = self._load_dataframe_artifact_records(
+            review_queue_context_payload.get("input_queue_path") or "data/interim/review_queue.csv"
+        )
 
         dashboard_path = self._normalize_artifact_reference(dashboard.get("dashboard_path") or "reports/run_dashboard.html")
         final_report_path = self._normalize_artifact_reference(dashboard.get("final_report_path") or "final_report.md")
@@ -1589,6 +1594,19 @@ class ReportingService:
             eda_context_payload.get("cleaned_word_cloud", {})
             if isinstance(eda_context_payload, dict)
             else {}
+        )
+        hitl_panel_html = self._render_dashboard_hitl_panel(
+            dashboard_path,
+            review,
+            review_queue_context_payload,
+            review_queue_preview_rows,
+            agreement,
+            training_comparison,
+        )
+        llm_panel_html = self._render_dashboard_llm_panel(
+            dashboard_path,
+            annotation,
+            annotation_trace_payload,
         )
 
         next_step = self._normalize_text(dashboard.get("next_step")) or self._normalize_text(review.get("next_step")) or "inspect artifacts"
@@ -1753,6 +1771,52 @@ class ReportingService:
     .artifact-status.expected {{ background: var(--warm-soft); color: #9a5a03; }}
     .artifact-note, .muted {{ color: var(--muted); font-size: 0.92rem; line-height: 1.5; }}
     .artifact-path {{ margin-top: 6px; font-family: "Cascadia Mono", "Consolas", monospace; font-size: 0.8rem; color: var(--accent); word-break: break-all; }}
+    .sub-metric-grid {{ display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-top: 16px; }}
+    .sub-metric {{
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.72);
+    }}
+    .sub-metric .metric-label {{ font-size: 11px; }}
+    .sub-metric .metric-value {{ margin-top: 8px; font-size: 1.1rem; }}
+    .stack {{ display: grid; gap: 12px; margin-top: 16px; }}
+    .checklist {{ margin: 0; padding-left: 18px; color: var(--muted); line-height: 1.6; }}
+    .mini-table-wrap {{
+      margin-top: 16px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.78);
+    }}
+    .mini-table {{ width: 100%; border-collapse: collapse; min-width: 560px; }}
+    .mini-table th, .mini-table td {{
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 0.9rem;
+    }}
+    .mini-table th {{
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      background: rgba(31, 111, 120, 0.06);
+    }}
+    .mini-table tr:last-child td {{ border-bottom: none; }}
+    .callout {{
+      border-radius: 18px;
+      padding: 14px 16px;
+      background: rgba(203, 229, 223, 0.52);
+      border: 1px solid rgba(31, 111, 120, 0.14);
+      color: var(--ink);
+      line-height: 1.55;
+    }}
+    .callout.warning {{
+      background: rgba(253, 231, 199, 0.78);
+      border-color: rgba(217, 119, 6, 0.18);
+    }}
     .word-cloud-shell {{ display: grid; gap: 14px; }}
     .word-cloud-meta {{ color: var(--muted); font-size: 0.92rem; line-height: 1.5; }}
     .word-cloud {{
@@ -1828,6 +1892,19 @@ class ReportingService:
       <div class="panel">
         <h2>Quality and review signals</h2>
         {warnings_html}
+      </div>
+    </section>
+
+    <section class="layout" style="margin-top: 20px;">
+      <div class="panel">
+        <h2>HITL control center</h2>
+        <p>Эта зона показывает, что именно должен сделать человек на текущем запуске, какие метки допустимы, и какой файл нужно вернуть обратно в pipeline.</p>
+        {hitl_panel_html}
+      </div>
+      <div class="panel">
+        <h2>LLM annotation center</h2>
+        <p>Здесь видно, какая annotation path реально работала в текущем запуске: offline mock, Gemini или fallback-режим, плюс сколько строк ушло в low-confidence и fallback.</p>
+        {llm_panel_html}
       </div>
     </section>
 
@@ -1963,6 +2040,20 @@ class ReportingService:
 
         return payload if isinstance(payload, dict) else {}
 
+    def _load_dataframe_artifact_records(self, value: Any) -> list[dict[str, Any]]:
+        """Load a local dataframe-like artifact and materialize it into record dictionaries."""
+
+        normalized = self._normalize_artifact_reference(value)
+        if not normalized or "://" in normalized:
+            return []
+
+        try:
+            payload = self.registry.load_dataframe(normalized)
+        except Exception:
+            return []
+
+        return self._to_records(payload)
+
     def _dashboard_href(self, dashboard_path: str, target_path: Any) -> str:
         """Build an HTML-friendly relative href from the dashboard to a local artifact."""
 
@@ -2057,6 +2148,252 @@ class ReportingService:
             f'<div class="step-title">{self._escape_html(step.get("name"))}</div>'
             f'<div class="step-detail">{self._escape_html(step.get("detail"))}</div>'
             "</article>"
+        )
+
+    def _render_dashboard_hitl_panel(
+        self,
+        dashboard_path: str,
+        review: dict[str, Any],
+        review_queue_context: dict[str, Any],
+        review_queue_rows: list[dict[str, Any]],
+        agreement: dict[str, Any],
+        training_comparison: dict[str, Any],
+    ) -> str:
+        """Render the human-in-the-loop control center inside the operator dashboard."""
+
+        review_required = bool(review.get("review_required"))
+        review_status = self._normalize_text(review.get("status")) or "unknown"
+        corrected_queue_path = (
+            self._normalize_artifact_reference(review_queue_context.get("expected_corrected_queue_path"))
+            or "data/interim/review_queue_corrected.csv"
+        )
+        label_options = (
+            review_queue_context.get("label_options")
+            if isinstance(review_queue_context.get("label_options"), list)
+            else []
+        )
+        preview_rows = review_queue_rows[:4]
+        hitl_waiting = review_required and review_status == "skipped_missing_corrected_queue"
+        queue_rows = self._format_numeric(review.get("review_queue_rows", len(review_queue_rows)))
+        threshold = self._format_numeric(review_queue_context.get("confidence_threshold", "n/a"))
+        compared_rows = self._format_numeric(agreement.get("compared_rows", 0))
+        label_changes = self._format_numeric(training_comparison.get("n_effect_label_changes", 0))
+
+        status_note = (
+            "Reviewer action is currently blocking the next clean retrain."
+            if hitl_waiting
+            else (
+                "Corrected labels have already been returned to the pipeline for this run."
+                if review_status in {"merged", "merged_no_changes"}
+                else "This run does not currently require manual correction."
+            )
+        )
+        callout_class = "callout warning" if hitl_waiting else "callout"
+        checklist_items = (
+            [
+                "Open the review workspace or the review_queue.csv file.",
+                "Fill reviewed_effect_label only with one of the allowed effect labels.",
+                "Optionally add review_comment and human_verified for confirmed rows.",
+                "Save the result as review_queue_corrected.csv and rerun the same pipeline config.",
+                "Then inspect review_merge_report.md, review_agreement_report.md, and training_comparison_report.md.",
+            ]
+            if hitl_waiting
+            else (
+                [
+                    "Inspect review_merge_report.md to confirm how the corrected labels were applied.",
+                    "Check review_agreement_report.md to see agreement and kappa on the reviewed subset.",
+                    "Use training_comparison_report.md to confirm whether HITL improved the final metrics.",
+                ]
+                if review_status in {"merged", "merged_no_changes"}
+                else [
+                    "Manual review is not required for this run because the low-confidence queue is empty.",
+                    "You can still inspect the review workspace and queue context for auditability.",
+                ]
+            )
+        )
+        checklist_html = "".join(f"<li>{self._escape_html(item)}</li>" for item in checklist_items)
+
+        quick_links = [
+            {
+                "label": "Open review workspace",
+                "path": review.get("review_workspace_path"),
+                "description": "Main HTML interface for the reviewer.",
+                "expected": False,
+            },
+            {
+                "label": "Open review queue CSV",
+                "path": review_queue_context.get("input_queue_path") or "data/interim/review_queue.csv",
+                "description": "Raw queue exported from low-confidence annotation rows.",
+                "expected": False,
+            },
+            {
+                "label": "Open corrected queue CSV",
+                "path": corrected_queue_path,
+                "description": "Expected reviewer output file that should be returned to the pipeline.",
+                "expected": True,
+            },
+            {
+                "label": "Open merge report",
+                "path": review.get("review_merge_report_path"),
+                "description": "Summary of what happened after reviewer edits were merged back in.",
+                "expected": False,
+            },
+        ]
+        quick_links_html = "".join(
+            self._render_dashboard_link_tile(
+                dashboard_path,
+                item["label"],
+                item["path"],
+                item["description"],
+                expected=bool(item["expected"]),
+            )
+            for item in quick_links
+        )
+
+        if preview_rows:
+            body_html = "".join(
+                "<tr>"
+                f"<td>{self._escape_html(self._normalize_text(row.get('id')))}</td>"
+                f"<td>{self._escape_html(self._normalize_text(row.get('effect_label')))}</td>"
+                f"<td>{self._escape_html(self._format_numeric(row.get('confidence')))}</td>"
+                f"<td>{self._escape_html(self._truncate_text(row.get('text'), limit=110))}</td>"
+                "</tr>"
+                for row in preview_rows
+            )
+            preview_html = (
+                '<div class="mini-table-wrap"><table class="mini-table">'
+                "<thead><tr><th>id</th><th>effect_label</th><th>confidence</th><th>text</th></tr></thead>"
+                f"<tbody>{body_html}</tbody></table></div>"
+            )
+        else:
+            preview_html = '<p class="muted" style="margin-top: 14px;">Review queue preview is empty for this run.</p>'
+
+        return (
+            f'<div class="{self._escape_html(callout_class)}">{self._escape_html(status_note)}</div>'
+            '<div class="sub-metric-grid">'
+            f'<div class="sub-metric"><div class="metric-label">Queue rows</div><div class="metric-value">{self._escape_html(queue_rows)}</div></div>'
+            f'<div class="sub-metric"><div class="metric-label">Threshold</div><div class="metric-value">{self._escape_html(threshold)}</div></div>'
+            f'<div class="sub-metric"><div class="metric-label">Compared rows</div><div class="metric-value">{self._escape_html(compared_rows)}</div></div>'
+            f'<div class="sub-metric"><div class="metric-label">Effect-label changes</div><div class="metric-value">{self._escape_html(label_changes)}</div></div>'
+            "</div>"
+            '<div class="stack">'
+            f'<p><strong>Review status:</strong> {self._escape_html(review_status)}</p>'
+            f'<p><strong>Next step:</strong> {self._escape_html(self._normalize_text(review.get("next_step")) or "inspect review artifacts")}</p>'
+            '<div><p><strong>Allowed effect labels</strong></p>'
+            f'<div class="tag-wrap">{self._render_dashboard_tag_list(label_options, empty_label="not set")}</div></div>'
+            "<div><p><strong>Reviewer checklist</strong></p>"
+            f'<ol class="checklist">{checklist_html}</ol></div>'
+            "</div>"
+            f'<div class="quick-links">{quick_links_html}</div>'
+            f"{preview_html}"
+        )
+
+    def _render_dashboard_llm_panel(
+        self,
+        dashboard_path: str,
+        annotation: dict[str, Any],
+        annotation_trace: dict[str, Any],
+    ) -> str:
+        """Render the LLM/annotation control center inside the operator dashboard."""
+
+        use_llm_requested = bool(annotation.get("use_llm_requested"))
+        requested_provider = self._normalize_text(annotation.get("requested_provider")) or "disabled"
+        resolved_provider = self._normalize_text(annotation.get("resolved_provider")) or "disabled"
+        provider_status = self._normalize_text(annotation.get("provider_status")) or "unknown"
+        llm_mode = self._normalize_text(annotation.get("llm_mode")) or self._normalize_text(annotation_trace.get("llm_mode")) or "unknown"
+        n_low_confidence = self._format_numeric(annotation.get("n_low_confidence", 0))
+        n_fallback_rows = self._format_numeric(annotation.get("n_fallback_rows", 0))
+        effect_labels = annotation.get("effect_labels") if isinstance(annotation.get("effect_labels"), list) else []
+        if not effect_labels:
+            prompt_contract = annotation_trace.get("prompt_contract", {}) if isinstance(annotation_trace.get("prompt_contract"), dict) else {}
+            effect_labels = prompt_contract.get("effect_labels", []) if isinstance(prompt_contract.get("effect_labels"), list) else []
+        fallback_reason_counts = (
+            annotation.get("fallback_reason_counts")
+            if isinstance(annotation.get("fallback_reason_counts"), dict)
+            else {}
+        )
+        if not fallback_reason_counts:
+            parser_contract = annotation_trace.get("parser_contract", {}) if isinstance(annotation_trace.get("parser_contract"), dict) else {}
+            fallback_reason_counts = (
+                parser_contract.get("fallback_reason_counts")
+                if isinstance(parser_contract.get("fallback_reason_counts"), dict)
+                else {}
+            )
+        parse_status_counts = {}
+        parser_contract = annotation_trace.get("parser_contract", {}) if isinstance(annotation_trace.get("parser_contract"), dict) else {}
+        if isinstance(parser_contract.get("parse_status_counts"), dict):
+            parse_status_counts = parser_contract.get("parse_status_counts")
+
+        if provider_status == "gemini_requested_but_mock_fallback_active":
+            llm_note = "Gemini was requested, but the run used the offline-safe mock fallback. This usually means GEMINI_API_KEY was missing."
+            callout_class = "callout warning"
+        elif resolved_provider == "gemini":
+            llm_note = "Gemini annotation is active for this run, and the trace/report pair can be used to inspect the prompt contract."
+            callout_class = "callout"
+        elif resolved_provider == "mock":
+            llm_note = "The deterministic mock LLM path is active. This is the safest offline/demo mode and keeps annotation reproducible."
+            callout_class = "callout"
+        elif not use_llm_requested:
+            llm_note = "LLM assistance is disabled in config, so annotation stays on the deterministic offline path."
+            callout_class = "callout"
+        else:
+            llm_note = "A custom or unknown annotation provider was resolved. Inspect the trace report before relying on the output."
+            callout_class = "callout warning"
+
+        parse_tags = [
+            f"{self._normalize_text(key)}: {self._format_numeric(value)}"
+            for key, value in parse_status_counts.items()
+        ]
+        fallback_tags = [
+            f"{self._normalize_text(key)}: {self._format_numeric(value)}"
+            for key, value in fallback_reason_counts.items()
+        ]
+
+        quick_links = [
+            {
+                "label": "Open annotation report",
+                "path": annotation.get("annotation_report_path"),
+                "description": "Human-facing summary of confidence and label distribution.",
+                "expected": False,
+            },
+            {
+                "label": "Open annotation trace",
+                "path": annotation.get("annotation_trace_report_path"),
+                "description": "Prompt contract, parser contract, and fallback trace for the current run.",
+                "expected": False,
+            },
+        ]
+        quick_links_html = "".join(
+            self._render_dashboard_link_tile(
+                dashboard_path,
+                item["label"],
+                item["path"],
+                item["description"],
+                expected=False,
+            )
+            for item in quick_links
+        )
+
+        return (
+            f'<div class="{self._escape_html(callout_class)}">{self._escape_html(llm_note)}</div>'
+            '<div class="sub-metric-grid">'
+            f'<div class="sub-metric"><div class="metric-label">LLM requested</div><div class="metric-value">{self._escape_html("yes" if use_llm_requested else "no")}</div></div>'
+            f'<div class="sub-metric"><div class="metric-label">Resolved provider</div><div class="metric-value">{self._escape_html(resolved_provider)}</div></div>'
+            f'<div class="sub-metric"><div class="metric-label">LLM mode</div><div class="metric-value">{self._escape_html(llm_mode)}</div></div>'
+            f'<div class="sub-metric"><div class="metric-label">Fallback rows</div><div class="metric-value">{self._escape_html(n_fallback_rows)}</div></div>'
+            "</div>"
+            '<div class="stack">'
+            f'<p><strong>Requested provider:</strong> {self._escape_html(requested_provider)}</p>'
+            f'<p><strong>Provider status:</strong> {self._escape_html(provider_status)}</p>'
+            f'<p><strong>Low-confidence rows:</strong> {self._escape_html(n_low_confidence)}</p>'
+            '<div><p><strong>Effect labels in prompt contract</strong></p>'
+            f'<div class="tag-wrap">{self._render_dashboard_tag_list(effect_labels, empty_label="not set")}</div></div>'
+            '<div><p><strong>Parse status counts</strong></p>'
+            f'<div class="tag-wrap">{self._render_dashboard_tag_list(parse_tags, empty_label="not observed")}</div></div>'
+            '<div><p><strong>Fallback reasons</strong></p>'
+            f'<div class="tag-wrap">{self._render_dashboard_tag_list(fallback_tags, empty_label="none")}</div></div>'
+            "</div>"
+            f'<div class="quick-links">{quick_links_html}</div>'
         )
 
     def _build_dashboard_artifact_groups(self, summary: dict[str, Any]) -> list[dict[str, Any]]:

@@ -183,6 +183,100 @@ flowchart LR
 
 ---
 
+## Как проект закрывает 4 задания
+
+### Задание 1. `DataCollectionAgent`
+
+Первое задание в проекте закрывается через связку `SourceDiscoveryService` + `DataCollectionAgent`.
+
+Что уже реализовано по сути задания:
+
+- поиск источников по теме;
+- загрузка `hf_dataset`;
+- реальный `fetch_api(...)` для JSON API;
+- реальный `scrape(url, selector)` через `requests + BeautifulSoup`;
+- merge нескольких источников в каноническую текстовую схему;
+- EDA-артефакты после сбора и очистки.
+
+Честное ограничение текущего состояния: `github_repo` сейчас используется как discovery-кандидат и источник контекста, а не как полноценный collection backend.
+
+### Задание 2. `DataQualityAgent`
+
+Второе задание закрывается через `DataQualityAgent` и отчёты качества.
+
+Что уже есть:
+
+- поиск пропусков;
+- поиск дубликатов;
+- поиск выбросов;
+- анализ дисбаланса классов;
+- сравнение до/после;
+- cleaned dataset и EDA на очищенных данных.
+
+То есть это уже не отдельный ноутбук-детектив, а встроенный этап единого pipeline.
+
+### Задание 3. `AnnotationAgent`
+
+Третье задание закрывается через `AnnotationAgent` и HITL-контур.
+
+Что уже есть:
+
+- auto-label для text-first сценария;
+- confidence-aware review queue;
+- annotation trace;
+- Label Studio export helper;
+- `review_queue.csv` и `review_queue_corrected.csv`;
+- agreement и `Cohen's kappa` на reviewed subset;
+- reviewer-facing `reports/review_workspace.html`.
+
+Это соответствует идее: агент не просто размечает, а умеет вынести спорные примеры на ручную доразметку и потом честно сравнить авто- и human-labels.
+
+### Задание 4. `ActiveLearningAgent`
+
+Четвёртое задание в текущем проекте реализовано по треку A: `Active Learning`.
+
+Что уже есть:
+
+- локальная модель `TF-IDF + Logistic Regression`;
+- active learning loop;
+- стратегии `entropy` и `random`;
+- история итераций;
+- отдельный comparison report по стратегиям;
+- связь с HITL и reviewed retrain.
+
+Это делает AL-слой не декоративным, а связанным с качеством реального итогового датасета.
+
+### Финальный `Data Project`
+
+Финальный проект уже собран как единый text-first pipeline, где задания 1–4 работают не отдельно, а как этапы одной системы:
+
+`discovery -> collection -> quality -> annotation -> HITL -> active learning -> training -> reporting`
+
+Именно поэтому текущий репозиторий стоит показывать не как набор домашних заданий, а как единый воспроизводимый агентный data pipeline.
+
+---
+
+## Как показывать проект
+
+Самый безопасный и понятный сценарий показа на защите такой:
+
+1. Сначала показать `README.md` и кратко озвучить, что проект text-first, offline-first и запускается одной командой.
+2. Затем запустить `configs/demo_fitness.yaml` или `configs/demo_minecraft.yaml`.
+3. После выполнения открыть `reports/run_dashboard.html` как единую точку входа.
+4. Из dashboard перейти в `reports/eda_report.html`, `reports/review_workspace.html`, `reports/al_comparison_report.md` и `reports/training_comparison_report.md`.
+5. Отдельно проговорить, где именно в pipeline есть человек и как считаются agreement / kappa.
+6. Завершить показ `final_report.md`, где уже собраны ключевые пути, метрики и summary запуска.
+
+Что важно проговорить вслух:
+
+- offline demo — это основной стабильный baseline;
+- online path — расширение, а не обязательное условие запуска;
+- ML-слой в проекте явный и локальный;
+- HITL здесь реальный, потому что человек редактирует очередь и влияет на retrain;
+- pipeline подходит для text-first задач с настраиваемой темой и своими `effect_labels`.
+
+---
+
 ## Режимы работы
 
 ### Offline demo mode
@@ -356,6 +450,7 @@ LLM используется только там, где он действите
 - `reports/review_merge_report.md`
 - `data/interim/review_agreement_context.json`
 - `reports/review_agreement_report.md`
+- `reports/al_report.md`
 - `reports/al_comparison_report.md`
 - `data/interim/al_comparison.json`
 - `reports/training_comparison_report.md`
@@ -393,7 +488,7 @@ python run_pipeline.py --config configs/demo_minecraft.yaml
 - `reports/eda_report.html`
 - `reports/review_workspace.html` если нужен ручной HITL-review
 
-`reports/run_dashboard.html` now also includes a cleaned word cloud preview built from post-quality `text`, so the operator can quickly verify the topic focus before retrain.
+`reports/run_dashboard.html` теперь также показывает cleaned word cloud, собранное из post-quality `text`, чтобы перед retrain можно было быстро проверить тематический фокус очищенных данных.
 
 ### Основная CLI-команда
 

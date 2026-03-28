@@ -181,3 +181,20 @@ runtime:
 
     with pytest.raises(ConfigError, match="runtime.mode"):
         load_config(config_path)
+
+
+def test_text_topic_template_config_loads_from_repo() -> None:
+    """The generic text-topic template should stay aligned with the supported config contract."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    config_path = repo_root / "configs" / "text_topic_template.yaml"
+
+    config = load_config(config_path)
+
+    assert config.project.name == "universal-agentic-data-pipeline-text-topic"
+    assert config.request.modality == "text"
+    assert config.request.task_type == "classification"
+    assert config.source.use_huggingface is True
+    assert config.annotation.use_llm is False
+    assert config.annotation.effect_labels == ["class_one", "class_two", "other"]
+    assert config.runtime.mode == "online"

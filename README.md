@@ -16,6 +16,40 @@
 
 ---
 
+## Supported Scope
+
+Текущий проект сознательно зафиксирован как **text-first pipeline**.
+
+Что поддерживается сейчас:
+
+- текстовые датасеты и текстовые записи, которые можно привести к схеме `text -> effect_label`;
+- offline demo запуск и reproducible local baseline;
+- online discovery extension для Hugging Face и GitHub shortlist;
+- human-in-the-loop review для low-confidence строк;
+- active learning track A поверх текстового baseline.
+
+Что пока не считается официально закрытым scope:
+
+- мультимодальность (`audio`, `image`);
+- production-grade web scraping;
+- hidden API discovery/extraction;
+- browser automation (`Selenium`, `Playwright`);
+- `requests-html`;
+- Kaggle ingestion.
+
+Лучше всего проект подходит для задач вида:
+
+- классификация отзывов;
+- классификация коротких текстов и описаний;
+- тематические текстовые выборки с небольшим набором целевых классов;
+- text datasets, где пользователь заранее задаёт `effect_labels`.
+
+Иными словами, честная формулировка проекта сейчас такая:
+
+`Universal Agentic Data Pipeline` — это **универсальный pipeline для text-first ML-задач**, а не универсальная мультимодальная ingestion-платформа для любых данных.
+
+---
+
 ## Архитектурная позиция проекта
 
 - **Offline-first**: основной режим проекта — детерминированный локальный baseline.
@@ -202,6 +236,27 @@ runtime:
 - `local_only` — запрещает удалённый discovery и оставляет только локальные/demo-артефакты, если они доступны.
 
 Важно: source-флаги в `source.*` описывают, какие внешние типы источников проект готов использовать, а `runtime.mode` определяет, какие из них реально активны в текущем запуске.
+
+---
+
+## Новый Text Topic
+
+Для запуска на новой теме теперь есть безопасный шаблон:
+
+- `configs/text_topic_template.yaml`
+
+Этот шаблон нужен для сценария:
+
+1. задать свою текстовую тему в `request.topic`;
+2. указать небольшой целевой набор `annotation.effect_labels`;
+3. выбрать runtime-режим без изменения кода;
+4. использовать тот же pipeline contract, что и в demo-конфигах.
+
+Важно:
+
+- шаблон рассчитан на **текстовую классификацию**, а не на audio/image задачи;
+- текущий training layer и active learning layer работают с полями `text` и `effect_label`;
+- если вы запускаете проект на новой теме, лучше начинать с малого числа классов и понятного `effect_labels` vocabulary.
 
 ---
 

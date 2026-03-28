@@ -1,0 +1,54 @@
+project:
+  name: universal-agentic-data-pipeline-text-topic
+  root_dir: .
+
+request:
+  topic: your text topic
+  modality: text
+  task_type: classification
+  domain: your_domain
+  sources_preference:
+    - dataset
+    - api
+    - scrape
+  label_schema:
+    effect:
+      - class_one
+      - class_two
+      - other
+
+source:
+  use_huggingface: true
+  use_public_api: false
+  use_internal_api: false
+  use_github_search: false
+  use_scraping_fallback: false
+  max_sources: 5
+
+annotation:
+  use_llm: false
+  llm_provider: ""
+  confidence_threshold: 0.6
+  effect_labels:
+    - class_one
+    - class_two
+    - other
+
+quality:
+  min_text_length: 20
+  deduplicate: true
+  max_missing_ratio: 0.2
+
+active_learning:
+  enabled: true
+  query_size: 20
+  uncertainty_threshold: 0.2
+
+training:
+  enabled: true
+  random_seed: 42
+  test_size: 0.2
+  validation_size: 0.1
+
+runtime:
+  mode: online

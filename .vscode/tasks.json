@@ -52,6 +52,21 @@
       "problemMatcher": []
     },
     {
+      "label": "run demo_fitness and open dashboard",
+      "type": "shell",
+      "command": ".\\.venv\\Scripts\\python.exe",
+      "args": [
+        "run_pipeline.py",
+        "--config",
+        "configs\\demo_fitness.yaml",
+        "--open-dashboard"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "run demo_minecraft",
       "type": "shell",
       "command": ".\\.venv\\Scripts\\python.exe",
@@ -59,6 +74,49 @@
         "run_pipeline.py",
         "--config",
         "configs\\demo_minecraft.yaml"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "run demo_minecraft and open dashboard",
+      "type": "shell",
+      "command": ".\\.venv\\Scripts\\python.exe",
+      "args": [
+        "run_pipeline.py",
+        "--config",
+        "configs\\demo_minecraft.yaml",
+        "--open-dashboard"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "open dashboard",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Start-Process .\\reports\\run_dashboard.html"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "open review workspace",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Start-Process .\\reports\\review_workspace.html"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

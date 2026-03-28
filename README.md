@@ -481,6 +481,12 @@ python run_pipeline.py --config configs/demo_fitness.yaml
 python run_pipeline.py --config configs/demo_minecraft.yaml
 ```
 
+Если хочется, чтобы dashboard открылся сразу после успешного запуска:
+
+```bash
+python run_pipeline.py --config configs/demo_fitness.yaml --open-dashboard
+```
+
 После запуска удобнее всего начинать просмотр с:
 
 - `reports/run_dashboard.html`
@@ -489,6 +495,7 @@ python run_pipeline.py --config configs/demo_minecraft.yaml
 - `reports/review_workspace.html` если нужен ручной HITL-review
 
 `reports/run_dashboard.html` теперь также показывает cleaned word cloud, собранное из post-quality `text`, чтобы перед retrain можно было быстро проверить тематический фокус очищенных данных.
+CLI теперь также печатает в терминал абсолютные пути к dashboard, final report, EDA HTML и review workspace, чтобы после первого запуска не искать их вручную.
 
 ### Основная CLI-команда
 
@@ -514,7 +521,11 @@ CLI в этом блоке не меняется: пайплайн по-преж
 - `unit tests`
 - `integration smoke`
 - `run demo_fitness`
+- `run demo_fitness and open dashboard`
 - `run demo_minecraft`
+- `run demo_minecraft and open dashboard`
+- `open dashboard`
+- `open review workspace`
 
 Что делать:
 
